@@ -1,3 +1,4 @@
+import os
 import json
 import requests
 
@@ -43,7 +44,16 @@ def fix_event(filename):
     with open("standards/" + new_filename, "w") as tmp:
         tmp.write(json.dumps(newdata, indent=4, sort_keys=True))
 
+def setup():
+    if not os.path.exists("standards"):
+        os.makedirs("standards")
+
+    if not os.path.exists("base_standards"):
+        os.makedirs("base_standards")
+
 if __name__ == '__main__':
+    setup()
+
     #download_event()
     filename = "base_standards/base_event.json"
     fix_event(filename)
