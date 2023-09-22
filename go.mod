@@ -1,5 +1,7 @@
 module schemalessGPT
 
+replace github.com/shuffle/shuffle-shared => ../../git/shuffle-shared
+
 go 1.20
 
 require gopkg.in/yaml.v3 v3.0.1

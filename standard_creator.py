@@ -20,7 +20,6 @@ def fix_event(filename):
     newdata = {}
     jsondata = json.loads(basedata)
     for item in jsondata["attributes"]:
-
         foundkey = ""
         foundtype = ""
         for key, value in item.items():

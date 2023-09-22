@@ -3,9 +3,12 @@ package main
 import (
 	"fmt"
 	"log"
+	"io/ioutil"
+	"os"
 	"context"
 	"encoding/json"
 	"strings"
+	"crypto/md5"
 	"sort"
 	//"strings"
 	// import yaml
@@ -21,18 +24,44 @@ func GptTranslate() {
 }
 
 func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[string]interface{}, error) {
-	// Check for it in memcache
+	// Making sure it's not too long
+	inputKeyTokenMd5 := fmt.Sprintf("%x", md5.Sum([]byte(inputKeyToken)))
 
 	returnStructure := map[string]interface{}{}
-	returnCache, err := shuffle.GetCache(ctx, inputKeyToken)
+	returnCache, err := shuffle.GetCache(ctx, inputKeyTokenMd5)
 	if err != nil {
 		log.Printf("[ERROR] Error getting cache: %v", err)
 		return returnStructure, err
 	}
 
-	log.Printf("returnCache: %v", returnCache)
+	// Setting the structure AGAIN to make it not time out
+	//cache, err := GetCache(ctx, cacheKey)
+	cacheData := []byte(returnCache.([]uint8))
+	//log.Printf("CACHEDATA: %s", cacheData)
+	err = json.Unmarshal(cacheData, &returnStructure)
+	if err != nil {
+		log.Printf("[ERROR] Failed to ")
+		return returnStructure, err
+	}
+
+	// Make returnCache into []byte
+	SetStructureCache(ctx, inputKeyToken, returnCacheByte)
 
 	return returnStructure, nil 
+}
+
+func SetStructureCache(ctx context.Context, inputKeyToken string, inputStructure []byte) error {
+	inputKeyTokenMd5 := fmt.Sprintf("%x", md5.Sum([]byte(inputKeyToken)))
+
+	err := shuffle.SetCache(ctx, inputKeyTokenMd5, inputStructure, 86400)
+	if err != nil {
+		log.Printf("[ERROR] Error setting cache for key %s: %v", inputKeyToken, err)
+		return err
+	}
+
+	log.Printf("[DEBUG] Successfully set structure for md5 '%s' in cache", inputKeyTokenMd5)
+
+	return nil
 }
 
 //https://stackoverflow.com/questions/40737122/convert-yaml-to-json-without-struct
@@ -200,15 +229,26 @@ func YamlConvert(startValue string) (string, error) {
 	return startValue, nil
 }
 
+func getTestStructure() []byte {
+	// Open the relevant file
+	filename := "example/base_event.json"
+	jsonFile, err := os.Open(filename)
+	if err != nil {
+		log.Printf("[ERROR] Error opening file %s: %v", filename, err)
+		return []byte{}
+	}
+
+	// Read the file into a byte array
+	byteValue, err  := ioutil.ReadAll(jsonFile)
+	if err != nil {
+		log.Printf("[ERROR] Error reading file %s: %v", filename, err)
+		return []byte{}
+	}
+
+	return byteValue
+}
+
 func runTests(ctx context.Context, inputStandard string, startValue string) {
-	/*
-	startValue := `Services: 
--   Orders: 
-    -   ID: $save ID1
-        SupplierOrderCode: $SupplierOrderCode
-    -   ID: $save ID2
-        SupplierOrderCode: 111111`
-	*/
 
 	// Doesn't handle list inputs in json
 	if !strings.HasPrefix(startValue, "{") || !strings.HasSuffix(startValue, "}") { 
@@ -229,15 +269,38 @@ func runTests(ctx context.Context, inputStandard string, startValue string) {
 
 	// Check if the keyToken is already in cache and use that translation layer
 	keyToken = fmt.Sprintf("%s:%s", inputStandard, keyToken)
-	GetStructureFromCache(ctx, keyToken)
+
+
+	inputStructure := getTestStructure()
+	err = SetStructureCache(ctx, keyToken, inputStructure) 
+	if err != nil {
+		log.Printf("[ERROR] Error in SetStructureCache: %v", err)
+	}
+
+	returnStructure, err := GetStructureFromCache(ctx, keyToken)
+	if err != nil {
+		log.Printf("[WARNING] Error in return structure. Should run OpenAI and set cache!")
+	} else {
+		log.Printf("[INFO] Structure received: %v", returnStructure)
+	}
 
 	log.Printf("returnJson: %v", string(returnJson))
 	log.Printf("keyToken: %v", keyToken)
 }
 
 func main() {
-	//startValue := `{"key5": {"key1":"value1", "key2": 2, "key3": true, "key4": null}, "key1":"value1", "key2": 2, "key3": true, "key4": null,  "key6": [{"key1":"value1", "key2": 2, "key3": true, "key4": null}, "hello", 1, true]}`
-	startValue := `{"title": {"key1":"value1", "key2": 2, "key3": true, "key4": null}, "key1":"value1", "key2": 2, "key3": true, "key4": null,  "key6": [{"key1":"value1", "key2": 2, "key3": true, "key4": null}, "hello", 1, true]}`
+
+	/*
+	startValue := `Services: 
+-   Orders: 
+    -   ID: $save ID1
+        SupplierOrderCode: $SupplierOrderCode
+    -   ID: $save ID2
+        SupplierOrderCode: 111111`
+	*/
+
+	//startValue := `{"title": {"key1":"value1", "key2": 2, "key3": true, "key4": null}, "key1":"value1", "key2": 2, "key3": true, "key4": null,  "key6": [{"key1":"value1", "key2": 2, "key3": true, "key4": null}, "hello", 1, true]}`
+	startValue := `{"title": "Here is a message for you", "description": "What is this?", "severity": "High", "status": "Open", "time_taken": "125"}`
 
 	allStandards := []string{"ticket"}
 
