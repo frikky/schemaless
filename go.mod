@@ -4,7 +4,10 @@ module github.com/frikky/schemalessGPT
 
 go 1.20
 
-require gopkg.in/yaml.v3 v3.0.1
+require (
+	github.com/shuffle/shuffle-shared v0.4.47
+	gopkg.in/yaml.v3 v3.0.1
+)
 
 require (
 	cloud.google.com/go v0.75.0 // indirect
@@ -33,7 +36,6 @@ require (
 	github.com/opensearch-project/opensearch-go/v2 v2.3.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
-	github.com/shuffle/shuffle-shared v0.4.47 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	go.opencensus.io v0.22.5 // indirect
 	go4.org v0.0.0-20201209231011-d4a079459e60 // indirect

@@ -1,4 +1,5 @@
-package github.com/frikky/schemalessGPT 
+package schemalessGPT 
+//package main 
 
 import (
 	"fmt"
@@ -10,17 +11,17 @@ import (
 	"strings"
 	"crypto/md5"
 	"sort"
-	//"strings"
-	// import yaml
     "gopkg.in/yaml.v3"
 
 	"github.com/shuffle/shuffle-shared"
-
-	// Should be removed as they're unecessary. Need to change shuffle shared to not require them
 )
 
-func GptTranslate() {
-
+func GptTranslate(standardFormat, inputDataFormat string) (string, error) {
+	return `{
+		"message": "title",
+		"subject": "description",
+		"identifier": "id"
+	}`, nil
 }
 
 func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[string]interface{}, error) {
@@ -39,7 +40,7 @@ func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[strin
 	cacheData := []byte(returnCache.([]uint8))
 	err = json.Unmarshal(cacheData, &returnStructure)
 	if err != nil {
-		log.Printf("[ERROR] Failed to unmarshal from cache: %s", err)
+		log.Printf("[ERROR] Failed to unmarshal from cache: %s. Value: %s", err, cacheData)
 		return returnStructure, err
 	}
 
@@ -231,23 +232,65 @@ func YamlConvert(startValue string) (string, error) {
 	return startValue, nil
 }
 
-func getTestStructure() []byte {
+
+func SaveTranslation(inputStandard, gptTranslated string) error {
+	// Write it to file in the example folder
+	filename := fmt.Sprintf("examples/%s.json", inputStandard)
+
+	// Open the file
+	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("[ERROR] Error opening file %s: %v", filename, err)
+		return err
+	}
+
+	// Write the translated value
+	if _, err := f.Write([]byte(gptTranslated)); err != nil {
+		log.Printf("[ERROR] Error writing to file %s: %v", filename, err)
+		return err
+	}
+
+	log.Printf("[INFO] Translation saved to %s", filename)
+	return nil
+}
+
+
+func GetStandard(inputStandard string) ([]byte, error) {
 	// Open the relevant file
-	filename := "example/base_event.json"
+	filename := fmt.Sprintf("standards/%s.json", inputStandard)
 	jsonFile, err := os.Open(filename)
 	if err != nil {
 		log.Printf("[ERROR] Error opening file %s: %v", filename, err)
-		return []byte{}
+		return []byte{}, err
 	}
 
 	// Read the file into a byte array
 	byteValue, err  := ioutil.ReadAll(jsonFile)
 	if err != nil {
 		log.Printf("[ERROR] Error reading file %s: %v", filename, err)
-		return []byte{}
+		return []byte{}, err
 	}
 
-	return byteValue
+	return byteValue, nil
+}
+
+func GetExistingStructure(inputStandard string) ([]byte, error) {
+	// Open the relevant file
+	filename := fmt.Sprintf("examples/%s.json", inputStandard)
+	jsonFile, err := os.Open(filename)
+	if err != nil {
+		log.Printf("[ERROR] Error opening file %s: %v", filename, err)
+		return []byte{}, err
+	}
+
+	// Read the file into a byte array
+	byteValue, err  := ioutil.ReadAll(jsonFile)
+	if err != nil {
+		log.Printf("[ERROR] Error reading file %s: %v", filename, err)
+		return []byte{}, err
+	}
+
+	return byteValue, nil
 }
 
 func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[string]interface{}) ([]byte, []byte, error) {
@@ -307,8 +350,26 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 	return translatedOutput, modifiedOutput, nil
 }
 
-func runTests(ctx context.Context, inputStandard string, startValue string) []byte{} {
+func fixPaths() {
+	// Check if folders "examples" and "standards" exists"
+	folders := []string{"examples", "standards"}
+	for _, folder := range folders {
+		if _, err := os.Stat(folder); os.IsNotExist(err) {
+			log.Printf("[INFO] Folder %s does not exist, creating it", folder)
+			os.Mkdir(folder, 0755)
+		}
+	}
+
+	log.Printf("[DEBUG] Folders fixed. The 'Standards' folder has the standards used for translation with GPT. 'Examples' folder contains info about already translated standards.")
+}
+
+func Translate(ctx context.Context, inputStandard string, inputValue []byte) []byte {
+	// Check for paths
+	fixPaths()
+
+
 	// Doesn't handle list inputs in json
+	startValue := string(inputValue)
 	if !strings.HasPrefix(startValue, "{") || !strings.HasSuffix(startValue, "}") { 
 		output, err := YamlConvert(startValue)
 		if err != nil {
@@ -322,14 +383,43 @@ func runTests(ctx context.Context, inputStandard string, startValue string) []by
 	returnJson, keyToken, err := RemoveJsonValues([]byte(startValue), 1)
 	if err != nil {
 		log.Printf("[ERROR] Error: %v", err)
-		return
+		return []byte{}
 	}
 
 	log.Printf("[DEBUG] Cleaned up input values: %v", string(returnJson))
-	keyToken = fmt.Sprintf("%s:%s", inputStandard, keyToken)
 
 	// Check if the keyToken is already in cache and use that translation layer
-	inputStructure := getTestStructure()
+	keyToken = fmt.Sprintf("%s:%s", inputStandard, keyToken)
+	keyTokenFile := fmt.Sprintf("%x", md5.Sum([]byte(keyToken)))
+
+	inputStructure, err := GetExistingStructure(keyTokenFile)
+	if err != nil {
+		log.Printf("\n\n[ERROR] Error in getExistingStructure for standard %s: %v\n\n", inputStandard, err)
+
+		// Check if the standard exists at all
+		standardFormat, err := GetStandard(inputStandard)
+		if err != nil {
+			log.Printf("[ERROR] Error in GetStandard for standard %s: %v", inputStandard, err)
+			return []byte{}
+		}
+
+		gptTranslated, err := GptTranslate(string(standardFormat), string(returnJson))
+		if err != nil {
+			log.Printf("[ERROR] Error in GptTranslate: %v", err)
+			return []byte{}
+		}
+
+		log.Printf("\n\n[DEBUG] GPT translated: %v. Should save this to file in folder 'examples'\n\n", string(gptTranslated))
+		err = SaveTranslation(keyTokenFile, gptTranslated)
+		if err != nil {
+			log.Printf("[ERROR] Error in SaveTranslation: %v", err)
+			return []byte{}
+		}
+
+		log.Printf("\n\n[DEBUG] Saved translation to file. Should now run OpenAI and set cache!\n\n")
+		inputStructure = []byte(gptTranslated)
+	}
+
 	err = SetStructureCache(ctx, keyToken, inputStructure) 
 	if err != nil {
 		log.Printf("[ERROR] Error in SetStructureCache: %v", err)
@@ -348,7 +438,7 @@ func runTests(ctx context.Context, inputStandard string, startValue string) []by
 	translation, modifiedInput, err := runJsonTranslation(ctx, []byte(startValue), returnStructure)
 	if err != nil {
 		log.Printf("[ERROR] Error in runJsonTranslation: %v", err)
-		return
+		return []byte{}
 	}  
 
 	log.Printf("translation: %v", string(translation))
@@ -376,6 +466,4 @@ func runTests(ctx context.Context, inputStandard string, startValue string) []by
 //
 //	ctx := context.Background()
 //	runTests(ctx, allStandards[0], startValue)
-//
-//
 //}
