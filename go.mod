@@ -1,4 +1,4 @@
-module schemalessGPT
+module github.com/frikky/schemalessGPT
 
 //replace github.com/shuffle/shuffle-shared => ../../git/shuffle-shared
 

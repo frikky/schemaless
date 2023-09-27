@@ -1,4 +1,4 @@
-package schemalessGPT 
+package github.com/frikky/schemalessGPT 
 
 import (
 	"fmt"

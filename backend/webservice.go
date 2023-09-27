@@ -15,7 +15,7 @@ import (
 func init() {
 	r := mux.NewRouter()
 
-	r.HandleFunc("/api/v1/translate/{format}", shuffle.HealthCheckHandler)
+	r.HandleFunc("/api/v1/translate/{format}", shuffle.HealthCheckHandler).Methods("POST")
 
 	http.Handle("/", r)
 }
