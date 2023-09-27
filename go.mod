@@ -1,6 +1,6 @@
 module schemalessGPT
 
-replace github.com/shuffle/shuffle-shared => ../../git/shuffle-shared
+//replace github.com/shuffle/shuffle-shared => ../../git/shuffle-shared
 
 go 1.20
 
@@ -26,13 +26,14 @@ require (
 	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/google/uuid v1.1.2 // indirect
 	github.com/googleapis/gax-go/v2 v2.0.5 // indirect
+	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/jstemmer/go-junit-report v0.9.1 // indirect
 	github.com/mailru/easyjson v0.0.0-20190626092158-b2ccc519800e // indirect
 	github.com/opensearch-project/opensearch-go v1.1.0 // indirect
 	github.com/opensearch-project/opensearch-go/v2 v2.3.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
-	github.com/shuffle/shuffle-shared v0.4.45 // indirect
+	github.com/shuffle/shuffle-shared v0.4.47 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	go.opencensus.io v0.22.5 // indirect
 	go4.org v0.0.0-20201209231011-d4a079459e60 // indirect

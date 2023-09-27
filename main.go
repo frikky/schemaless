@@ -1,4 +1,4 @@
-package main
+package schemalessGPT 
 
 import (
 	"fmt"
@@ -37,15 +37,17 @@ func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[strin
 	// Setting the structure AGAIN to make it not time out
 	//cache, err := GetCache(ctx, cacheKey)
 	cacheData := []byte(returnCache.([]uint8))
-	//log.Printf("CACHEDATA: %s", cacheData)
 	err = json.Unmarshal(cacheData, &returnStructure)
 	if err != nil {
-		log.Printf("[ERROR] Failed to ")
+		log.Printf("[ERROR] Failed to unmarshal from cache: %s", err)
 		return returnStructure, err
 	}
 
-	// Make returnCache into []byte
-	SetStructureCache(ctx, inputKeyToken, returnCacheByte)
+	// Reseting it in cache to update timing
+	err = SetStructureCache(ctx, inputKeyToken, cacheData)
+	if err != nil {
+		log.Printf("[ERROR] Error setting cache for key %s: %v", inputKeyToken, err)
+	}
 
 	return returnStructure, nil 
 }
@@ -248,8 +250,64 @@ func getTestStructure() []byte {
 	return byteValue
 }
 
-func runTests(ctx context.Context, inputStandard string, startValue string) {
+func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[string]interface{}) ([]byte, []byte, error) {
+	log.Printf("Should translate %s based on %s", string(inputValue), translation)
 
+	// Unmarshal the byte back into a map[string]interface{}
+	var parsedInput map[string]interface{}
+	err := json.Unmarshal(inputValue, &parsedInput)
+	if err != nil {
+		log.Printf("[ERROR] Error in inputValue unmarshal during translation: %v", err)
+		return []byte{}, []byte{}, err
+	}
+
+	log.Printf("parsedInput: %v", parsedInput)
+
+	// Keeping a copy of the original parsedInput which will be changed
+	modifiedParsedInput := parsedInput
+
+	// Creating a new map to store the translated values
+	translatedInput := make(map[string]interface{})
+
+	for translationKey, translationValue := range translation {
+		log.Printf("Should translate field %#v from input to %#v in standard", translationValue, translationKey)
+
+		// Find the field in the parsedInput
+		for inputKey, inputValue:= range parsedInput {
+			_ = inputValue
+			if inputKey == translationValue {
+				log.Printf("Found field %#v in input", inputKey)
+
+
+				modifiedParsedInput[translationKey] = inputValue
+
+				// Add the translated field to the translatedInput
+				translatedInput[translationKey] = inputValue
+			}
+		}
+	}
+
+	log.Printf("modifiedParsedInput: %v", modifiedParsedInput)
+	log.Printf("translatedInput: %v", translatedInput)
+
+	// Marshal the map[string]interface{} back into a byte
+	translatedOutput, err := json.Marshal(translatedInput)
+	if err != nil {
+		log.Printf("[ERROR] Error in translatedInput marshal: %v", err)
+		return []byte{}, []byte{}, err
+	}
+
+	// Marshal the map[string]interface{} back into a byte
+	modifiedOutput, err := json.Marshal(modifiedParsedInput)
+	if err != nil {
+		log.Printf("[ERROR] Error in modifiedParsedInput marshal: %v", err)
+		return translatedOutput, []byte{}, err 
+	}
+
+	return translatedOutput, modifiedOutput, nil
+}
+
+func runTests(ctx context.Context, inputStandard string, startValue string) []byte{} {
 	// Doesn't handle list inputs in json
 	if !strings.HasPrefix(startValue, "{") || !strings.HasSuffix(startValue, "}") { 
 		output, err := YamlConvert(startValue)
@@ -267,10 +325,10 @@ func runTests(ctx context.Context, inputStandard string, startValue string) {
 		return
 	}
 
-	// Check if the keyToken is already in cache and use that translation layer
+	log.Printf("[DEBUG] Cleaned up input values: %v", string(returnJson))
 	keyToken = fmt.Sprintf("%s:%s", inputStandard, keyToken)
 
-
+	// Check if the keyToken is already in cache and use that translation layer
 	inputStructure := getTestStructure()
 	err = SetStructureCache(ctx, keyToken, inputStructure) 
 	if err != nil {
@@ -284,28 +342,40 @@ func runTests(ctx context.Context, inputStandard string, startValue string) {
 		log.Printf("[INFO] Structure received: %v", returnStructure)
 	}
 
-	log.Printf("returnJson: %v", string(returnJson))
+	log.Printf("returnStructure: %#v", returnStructure)
 	log.Printf("keyToken: %v", keyToken)
+
+	translation, modifiedInput, err := runJsonTranslation(ctx, []byte(startValue), returnStructure)
+	if err != nil {
+		log.Printf("[ERROR] Error in runJsonTranslation: %v", err)
+		return
+	}  
+
+	log.Printf("translation: %v", string(translation))
+	log.Printf("modifiedInput: %v", string(modifiedInput))
+
+	return translation
 }
 
-func main() {
 
-	/*
-	startValue := `Services: 
--   Orders: 
-    -   ID: $save ID1
-        SupplierOrderCode: $SupplierOrderCode
-    -   ID: $save ID2
-        SupplierOrderCode: 111111`
-	*/
-
-	//startValue := `{"title": {"key1":"value1", "key2": 2, "key3": true, "key4": null}, "key1":"value1", "key2": 2, "key3": true, "key4": null,  "key6": [{"key1":"value1", "key2": 2, "key3": true, "key4": null}, "hello", 1, true]}`
-	startValue := `{"title": "Here is a message for you", "description": "What is this?", "severity": "High", "status": "Open", "time_taken": "125"}`
-
-	allStandards := []string{"ticket"}
-
-	ctx := context.Background()
-	runTests(ctx, allStandards[0], startValue)
-
-
-}
+//func main() {
+//
+//	/*
+//	startValue := `Services: 
+//-   Orders: 
+//    -   ID: $save ID1
+//        SupplierOrderCode: $SupplierOrderCode
+//    -   ID: $save ID2
+//        SupplierOrderCode: 111111`
+//	*/
+//
+//	//startValue := `{"title": {"key1":"value1", "key2": 2, "key3": true, "key4": null}, "key1":"value1", "key2": 2, "key3": true, "key4": null,  "key6": [{"key1":"value1", "key2": 2, "key3": true, "key4": null}, "hello", 1, true]}`
+//	startValue := `{"title": "Here is a message for you", "description": "What is this?", "severity": "High", "status": "Open", "time_taken": "125", "id": "1234"}`
+//
+//	allStandards := []string{"ticket"}
+//
+//	ctx := context.Background()
+//	runTests(ctx, allStandards[0], startValue)
+//
+//
+//}
