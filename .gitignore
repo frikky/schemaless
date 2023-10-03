@@ -2,3 +2,5 @@
 *.swp
 *.swn
 *.pyc
+
+node_modules

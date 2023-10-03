@@ -27,12 +27,16 @@ def fix_event(filename):
 
             if item[foundkey]["type"] == "string_t":
                 newdata[foundkey] = ""
+                newdata[foundkey] = item[foundkey]["description"]
             elif item[foundkey]["type"] == "integer_t":
                 newdata[foundkey] = 0
+                newdata[foundkey] = item[foundkey]["description"]
             elif item[foundkey]["type"] == "timestamp_t":
                 newdata[foundkey] = "2016-01-01T00:00:00.000Z"
+                newdata[foundkey] = item[foundkey]["description"]
             elif item[foundkey]["type"] == "object_t":
                 newdata[foundkey] = {}
+                newdata[foundkey] = item[foundkey]["description"]
             else:
                 print(item)
 

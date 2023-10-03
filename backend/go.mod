@@ -34,6 +34,7 @@ require (
 	github.com/opensearch-project/opensearch-go v1.1.0 // indirect
 	github.com/opensearch-project/opensearch-go/v2 v2.3.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
+	github.com/sashabaranov/go-openai v1.15.3 // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/shuffle/shuffle-shared v0.4.47 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
