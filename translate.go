@@ -26,7 +26,7 @@ func SaveQuery(inputStandard, gptTranslated string) error {
 	// Open the file
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Printf("[ERROR] Error opening file %s: %v", filename, err)
+		//log.Printf("[ERROR] Error opening file %s (1): %v", filename, err)
 		return err
 	}
 
@@ -42,8 +42,20 @@ func SaveQuery(inputStandard, gptTranslated string) error {
 
 func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string) (string, error) {
 
-	systemMessage := "Output only as a translated JSON message, and nothing more. Remove keys that were not modified."
-	userQuery := fmt.Sprintf(`Use the following standard to translate the following input JSON data. If the key is a synonym or similar between the two, add the key of the input to the value of the standard.\nStandard:\n%s\nInput:\n%s`, standardFormat, inputDataFormat)
+	//systemMessage := fmt.Sprintf("Use the this standard format for the output, and neither add things at the start, nor subtract from the end. Only modify the keys. Add ONLY the most relevant matching key, and make sure each key has a value. It NEEDS to be a valid JSON message: %s", standardFormat)
+	//userQuery := fmt.Sprintf(`Use the standard to translate the following input JSON data. If the key is a synonym, matching or similar between the two, add the key of the input to the value of the standard. User Input:\n%s`, inputDataFormat)
+
+	systemMessage := fmt.Sprintf("Ensure the output is valid JSON, and does NOT add more keys to the standard. Make sure each key in the standard has a value from the user input. If values are nested, ALWAYS add the nested value in jq format such as 'secret.version.value'")
+	userQuery := fmt.Sprintf(`Translate the given user input JSON structure to a standard format. Use the values from the standard to guide you what to look for. The standard format should follow the pattern:
+
+%s
+
+User Input:
+%s
+
+Generate the standard output structure without providing the expected output.
+`, standardFormat, inputDataFormat)
+
 
 	if len(os.Getenv("OPENAI_API_KEY")) == 0 {
 		return "", errors.New("OPENAI_API_KEY not set")
@@ -75,7 +87,7 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string) (string,
 						Content: userQuery,
 					},
 				},
-				Temperature: 1.0,
+				Temperature: 0,
 			},
 		)
 
@@ -136,7 +148,7 @@ func SetStructureCache(ctx context.Context, inputKeyToken string, inputStructure
 		return err
 	}
 
-	log.Printf("[DEBUG] Successfully set structure for md5 '%s' in cache", inputKeyTokenMd5)
+	//log.Printf("[DEBUG] Successfully set structure for md5 '%s' in cache", inputKeyTokenMd5)
 
 	return nil
 }
@@ -157,7 +169,6 @@ func YamlToJson(i interface{}) interface{} {
     }
     return i
 }
-
 
 func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 	// Make the byte into a map[string]interface{} so we can iterate over it
@@ -318,7 +329,7 @@ func SaveTranslation(inputStandard, gptTranslated string) error {
 	// Open the file
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Printf("[ERROR] Error opening file %s: %v", filename, err)
+		//log.Printf("[ERROR] Error opening file %s (2): %v", filename, err)
 		return err
 	}
 
@@ -339,7 +350,7 @@ func SaveParsedInput(inputStandard string, gptTranslated []byte) error {
 	// Open the file
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Printf("[ERROR] Error opening file %s: %v", filename, err)
+		//log.Printf("[ERROR] Error opening file %s (3): %v", filename, err)
 		return err
 	}
 
@@ -358,7 +369,7 @@ func GetStandard(inputStandard string) ([]byte, error) {
 	filename := fmt.Sprintf("standards/%s.json", inputStandard)
 	jsonFile, err := os.Open(filename)
 	if err != nil {
-		log.Printf("[ERROR] Error opening file %s: %v", filename, err)
+		//log.Printf("[ERROR] Error opening file %s (4): %v", filename, err)
 		return []byte{}, err
 	}
 
@@ -377,7 +388,7 @@ func GetExistingStructure(inputStandard string) ([]byte, error) {
 	filename := fmt.Sprintf("examples/%s.json", inputStandard)
 	jsonFile, err := os.Open(filename)
 	if err != nil {
-		log.Printf("[ERROR] Error opening file %s: %v", filename, err)
+		//log.Printf("[ERROR] Error opening file %s (5): %v", filename, err)
 		return []byte{}, err
 	}
 
@@ -391,6 +402,61 @@ func GetExistingStructure(inputStandard string) ([]byte, error) {
 	return byteValue, nil
 }
 
+// Recurses to find keys deeper in the thingy
+// FIXME: Does not support loops yet
+// Should be able to handle jq/shuffle-json format
+func recurseFindKey(input map[string]interface{}, key string, depth int) (string, error) {
+	keys := strings.Split(key, ".")
+	if len(keys) > 1 {
+		key = keys[0]
+	}
+
+	for k, v := range input {
+		if k != key {
+			continue
+		}
+
+		if len(keys) == 1 {
+			if val, ok := v.(string); ok {
+				return val, nil
+			} else if val, ok := v.(map[string]interface{}); ok {
+				if b, err := json.MarshalIndent(val, "", "\t"); err != nil {
+					return "", err
+				} else {
+					return string(b), nil
+				}
+			} else if val, ok := v.([]interface{}); ok { 
+				if b, err := json.MarshalIndent(val, "", "\t"); err != nil {
+					return "", err
+				} else {
+					return string(b), nil
+				}
+			} else if val, ok := v.(bool); ok {
+				return fmt.Sprintf("%v", val), nil
+			} else if val, ok := v.(float64); ok {
+				return fmt.Sprintf("%v", val), nil
+			} else if val, ok := v.(int); ok {
+				return fmt.Sprintf("%v", val), nil
+			} else {
+				return "", fmt.Errorf("Value is not a string or map[string]interface{}")
+			}
+
+			return v.(string), nil
+		}
+
+		if _, ok := v.(map[string]interface{}); ok {
+			foundValue, err := recurseFindKey(v.(map[string]interface{}), strings.Join(keys[1:], "."), depth + 1)
+			if err != nil {
+				log.Printf("Error: %v", err)
+			} else {
+				return foundValue, nil
+			}
+		}
+	}
+
+	return "", errors.New("Key not found")
+}
+
 func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[string]interface{}) ([]byte, []byte, error) {
 	//log.Printf("Should translate %s based on %s", string(inputValue), translation)
 
@@ -402,7 +468,7 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 		return []byte{}, []byte{}, err
 	}
 
-	//log.Printf("parsedInput: %v", parsedInput)
+	log.Printf("parsedInput: %#v", parsedInput)
 
 	// Keeping a copy of the original parsedInput which will be changed
 	modifiedParsedInput := parsedInput
@@ -410,25 +476,43 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 	// Creating a new map to store the translated values
 	translatedInput := make(map[string]interface{})
 	for translationKey, translationValue := range translation {
-		log.Printf("Should translate field %#v from input to %#v in standard", translationValue, translationKey)
 
 		// Find the field in the parsedInput
+		found := false
 		for inputKey, inputValue:= range parsedInput {
 			_ = inputValue
-			if inputKey == translationValue {
-				log.Printf("Found field %#v in input", inputKey)
+			if inputKey != translationValue {
+				continue
+			}
 
 
-				modifiedParsedInput[translationKey] = inputValue
+			log.Printf("Found field %#v in input", inputKey)
+			modifiedParsedInput[translationKey] = inputValue
 
-				// Add the translated field to the translatedInput
-				translatedInput[translationKey] = inputValue
+			// Add the translated field to the translatedInput
+			translatedInput[translationKey] = inputValue
+			found = true 
+		}
+
+		if !found {
+			if val, ok := translationValue.(string); ok {
+				if strings.Contains(val, ".") {
+					log.Printf("[DEBUG] Digging deeper to find field %#v in input", translationValue)
+
+					recursed, err := recurseFindKey(parsedInput, translationValue.(string), 0)
+					if err != nil {
+						log.Printf("[ERROR] Error in recurseFindKey for %#v: %v", translationValue, err)
+					}
+
+					log.Printf("recursed: %#v", recursed)
+					modifiedParsedInput[translationKey] = recursed
+					translatedInput[translationKey] = recursed
+				}
+			} else {
+				log.Printf("[ERROR] Field %#v not found in input", translationValue)
 			}
 		}
 	}
-
-	//log.Printf("modifiedParsedInput: %v", modifiedParsedInput)
-	//log.Printf("translatedInput: %v", translatedInput)
 
 	// Marshal the map[string]interface{} back into a byte
 	translatedOutput, err := json.MarshalIndent(translatedInput, "", "\t")
@@ -497,7 +581,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte) []b
 
 	inputStructure, err := GetExistingStructure(keyTokenFile)
 	if err != nil {
-		log.Printf("\n\n[ERROR] Error in getExistingStructure for standard %s: %v\n\n", inputStandard, err)
+		//log.Printf("\n\n[ERROR] Error in getExistingStructure for standard %s: %v\n\n", inputStandard, err)
 
 		// Check if the standard exists at all
 		standardFormat, err := GetStandard(inputStandard)
@@ -512,7 +596,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte) []b
 			return []byte{}
 		}
 
-		log.Printf("\n\n[DEBUG] GPT translated: %v. Should save this to file in folder 'examples'\n\n", string(gptTranslated))
+		log.Printf("\n\n[DEBUG] GPT translated: %v. Should save this to file in folder 'examples' with filename %s\n\n", string(gptTranslated), keyTokenFile)
 		err = SaveTranslation(keyTokenFile, gptTranslated)
 		if err != nil {
 			log.Printf("[ERROR] Error in SaveTranslation: %v", err)

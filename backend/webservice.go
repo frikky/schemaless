@@ -41,7 +41,6 @@ func TranslateWrapper(resp http.ResponseWriter, request *http.Request) {
 
 	ctx := shuffle.GetContext(request)
 	parsedOutput := schemalessGPT.Translate(ctx, format, body)
-
 	if len(parsedOutput) == 0 {
 		resp.WriteHeader(400)
 		resp.Write([]byte(fmt.Sprintf(`{"success": false, "reason": "No output returned for format '%s'. Does the standard translation exist?"}`, format)))
@@ -66,10 +65,15 @@ func main() {
 		hostname = "MISSING"
 	}
 
+	log.Printf(`
+USAGE:
+$ curl localhost:5004/api/v1/translate_to/email -X POST -H "Content-Type: application/json" -d '{"title": "Here is a message for you", "description": "What is this?", "severity": "High", "status": "Open", "time_taken": "125", "id": "1234"}'
+	`)
+
 	innerPort := os.Getenv("BACKEND_PORT")
 	if innerPort == "" {
-		log.Printf("[DEBUG] Running on %s:5002", hostname)
-		log.Fatal(http.ListenAndServe(":5002", nil))
+		log.Printf("[DEBUG] Running on %s:5004", hostname)
+		log.Fatal(http.ListenAndServe(":5004", nil))
 	} else {
 		log.Printf("[DEBUG] Running on %s:%s", hostname, innerPort)
 		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", innerPort), nil))
