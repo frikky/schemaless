@@ -44,8 +44,7 @@ This is an example that finds matching nested values based on the User Input and
 **User Input**:
 ```
 {
-"secret":
-	{
+	"secret": {
 		"name":"username",
 		"version":{
 			"version":"1",
