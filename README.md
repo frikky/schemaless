@@ -1,5 +1,5 @@
 # Schemaless
-A general purpose JSON standardization translation engine
+A general purpose JSON standardization translation engine, using language models to translate for you
 
 ## Goal
 Make it easy to standardize the output of given data, no matter what the input was. After the translation has been done with an LLM the first time, the keys are sorted and hashed, and the structure is saved, meaning if it was correct, you will ever only have run the same data structure thorugh the setup ONCE. 
@@ -11,11 +11,11 @@ export OPENAI_API_KEY=your_key
 
 ## Use the package
 ```
-go get github.com/frikky/schemalessGPT
+go get github.com/frikky/schemaless
 ```
 
 ```
-output := schemalessGPT.Translate(ctx context.Context, standard string, userinput string) 
+output := schemaless.Translate(ctx context.Context, standard string, userinput string) 
 ```
 
 ## Test it
