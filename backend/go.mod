@@ -1,13 +1,12 @@
 module webservice
 
-replace github.com/frikky/schemalessGPT => ./..
+//replace github.com/frikky/schemaless => ./..
 
 go 1.20
 
 require (
-	github.com/frikky/schemalessGPT v0.0.0-20230927223715-7c9a22d22aff
 	github.com/gorilla/mux v1.8.0
-	github.com/shuffle/shuffle-shared v0.4.47
+	github.com/shuffle/shuffle-shared v0.5.70
 )
 
 require (

@@ -9,7 +9,7 @@ import (
 	"io/ioutil"
 
 	"github.com/gorilla/mux"
-	"github.com/frikky/schemalessGPT"
+	"github.com/frikky/schemaless"
 	"github.com/shuffle/shuffle-shared"
 )
 
@@ -40,7 +40,7 @@ func TranslateWrapper(resp http.ResponseWriter, request *http.Request) {
 	log.Printf("[DEBUG] Translating to format '%s'\n\n", format)
 
 	ctx := shuffle.GetContext(request)
-	parsedOutput := schemalessGPT.Translate(ctx, format, body)
+	parsedOutput := schemaless.Translate(ctx, format, body)
 	if len(parsedOutput) == 0 {
 		resp.WriteHeader(400)
 		resp.Write([]byte(fmt.Sprintf(`{"success": false, "reason": "No output returned for format '%s'. Does the standard translation exist?"}`, format)))

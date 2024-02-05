@@ -1,4 +1,4 @@
-package schemalessGPT 
+package schemaless
 //package main 
 
 import (
@@ -603,7 +603,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte) []b
 			return []byte{}
 		}
 
-		log.Printf("\n\n[DEBUG] Saved translation to file. Should now run OpenAI and set cache!\n\n")
+		log.Printf("[DEBUG] Saved translation to file. Should now run OpenAI and set cache!")
 		inputStructure = []byte(gptTranslated)
 	}
 

@@ -1,12 +1,10 @@
-module github.com/frikky/schemalessGPT
-
-replace github.com/shuffle/shuffle-shared => ../../git/shuffle-shared
+module github.com/frikky/schemaless
 
 go 1.20
 
 require (
 	github.com/sashabaranov/go-openai v1.19.2
-	github.com/shuffle/shuffle-shared v0.4.47
+	github.com/shuffle/shuffle-shared v0.5.70
 	gopkg.in/yaml.v3 v3.0.1
 )
 
