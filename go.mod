@@ -1,4 +1,4 @@
-module schemaless
+module github.com/frikky/schemaless
 
 go 1.20
 
