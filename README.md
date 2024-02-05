@@ -31,7 +31,7 @@ sh test.sh
 ```
 
 ## Example:
-This is an example that finds matching nested values based on the User Input and puts it in the value of the standard field.
+This is an example that finds matching nested values based on the User Input and puts it in the value of the standard field. The output values should be in a nested jq/shuffle json format.
 
 **Standard**:
 ```
@@ -59,7 +59,7 @@ This is an example that finds matching nested values based on the User Input and
 **Expected output**: 
 ```
 {
-	"kms_ey": "secret.name",
+	"kms_key": "secret.name",
 	"kms_value": "secret.version.value"
 }
 ```
