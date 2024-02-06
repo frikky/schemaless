@@ -42,11 +42,11 @@ func SaveQuery(inputStandard, gptTranslated string) error {
 
 	// Write the translated value
 	if _, err := f.Write([]byte(gptTranslated)); err != nil {
-		log.Printf("[ERROR] Error writing to file %s: %v", filename, err)
+		log.Printf("[ERROR] Schemaless: Error writing to file %s: %v", filename, err)
 		return err
 	}
 
-	log.Printf("[INFO] Translation saved to %s", filename)
+	log.Printf("[INFO] Schemaless: Translation saved to %s", filename)
 	return nil
 }
 
@@ -78,7 +78,7 @@ Generate the standard output structure without providing the expected output.
 	cnt := 0
 	for {
 		if cnt >= 5 {
-			log.Printf("[ERROR] Failed to match Formatting in standard translation after 5 tries. Returning empty string.")
+			log.Printf("[ERROR] Schemaless: Failed to match Formatting in standard translation after 5 tries. Returning empty string.")
 
 			return "", errors.New("Failed to match Formatting in standard translation after 5 tries")
 		}
@@ -102,7 +102,7 @@ Generate the standard output structure without providing the expected output.
 		)
 
 		if err != nil {
-			log.Printf("[ERROR] Failed to create chat completion in runActionAI. Retrying in 3 seconds (1): %s", err)
+			log.Printf("[ERROR] Schemaless: Failed to create chat completion in runActionAI. Retrying in 3 seconds (1): %s", err)
 			time.Sleep(3 * time.Second)
 			cnt += 1
 			continue
@@ -127,7 +127,7 @@ func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[strin
 	returnStructure := map[string]interface{}{}
 	returnCache, err := GetCache(ctx, inputKeyTokenMd5)
 	if err != nil {
-		log.Printf("[ERROR] Error getting cache: %v", err)
+		log.Printf("[ERROR] Schemaless: Error getting cache: %v", err)
 		return returnStructure, err
 	}
 
@@ -136,14 +136,14 @@ func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[strin
 	cacheData := []byte(returnCache.([]uint8))
 	err = json.Unmarshal(cacheData, &returnStructure)
 	if err != nil {
-		log.Printf("[ERROR] Failed to unmarshal from cache: %s. Value: %s", err, cacheData)
+		log.Printf("[ERROR] Schemaless: Failed to unmarshal from cache: %s. Value: %s", err, cacheData)
 		return returnStructure, err
 	}
 
 	// Reseting it in cache to update timing
 	err = SetStructureCache(ctx, inputKeyToken, cacheData)
 	if err != nil {
-		log.Printf("[ERROR] Error setting cache for key %s: %v", inputKeyToken, err)
+		log.Printf("[ERROR] Schemaless: Error setting cache for key %s: %v", inputKeyToken, err)
 	}
 
 	return returnStructure, nil 
@@ -154,11 +154,11 @@ func SetStructureCache(ctx context.Context, inputKeyToken string, inputStructure
 
 	err := SetCache(ctx, inputKeyTokenMd5, inputStructure, 86400)
 	if err != nil {
-		log.Printf("[ERROR] Error setting cache for key %s: %v", inputKeyToken, err)
+		log.Printf("[ERROR] Schemaless: Error setting cache for key %s: %v", inputKeyToken, err)
 		return err
 	}
 
-	//log.Printf("[DEBUG] Successfully set structure for md5 '%s' in cache", inputKeyTokenMd5)
+	//log.Printf("[DEBUG] Schemaless: Successfully set structure for md5 '%s' in cache", inputKeyTokenMd5)
 
 	return nil
 }
@@ -215,7 +215,7 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 					// Marshal the value
 					newParsedValue, err := json.MarshalIndent(parsedValue, "", "\t")
 					if err != nil {
-						log.Printf("[ERROR] Error in index %d of key %s: %v", loopItem, k, err)
+						log.Printf("[ERROR] Schemaless: Error in index %d of key %s: %v", loopItem, k, err)
 						continue
 					}
 
@@ -223,14 +223,14 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 					_ = newKeyToken
 
 					if err != nil {
-						log.Printf("[ERROR] Error: %v", err)
+						log.Printf("[ERROR] Schemaless: Error: %v", err)
 					} else {
 						//log.Printf("returnJson (1): %v", string(returnJson))
 						// Unmarshal the byte back into a map[string]interface{}
 						var jsonParsed2 map[string]interface{}
 						err := json.Unmarshal(returnJson, &jsonParsed2)
 						if err != nil {
-							log.Printf("[ERROR] Error: %v", err)
+							log.Printf("[ERROR] Schemaless: Error: %v", err)
 						} else {
 							newListItem = append(newListItem, jsonParsed2)
 						}
@@ -262,7 +262,7 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 		} else if _, ok := jsonParsed[k].(map[string]interface{}); ok {
 			newParsedValue, err := json.MarshalIndent(jsonParsed[k].(map[string]interface{}), "", "\t")
 			if err != nil {
-				log.Printf("[ERROR] Error in key %s: %v", k, err)
+				log.Printf("[ERROR] Schemaless: Error in key %s: %v", k, err)
 				continue
 			}
 
@@ -273,14 +273,14 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 			}
 
 			if err != nil {
-				log.Printf("[ERROR] Error: %v", err)
+				log.Printf("[ERROR] Schemaless: Error: %v", err)
 			} else {
 				//log.Printf("returnJson (2): %v", string(returnJson))
 				// Unmarshal the byte back into a map[string]interface{}
 				var jsonParsed2 map[string]interface{}
 				err := json.Unmarshal(returnJson, &jsonParsed2)
 				if err != nil {
-					log.Printf("[ERROR] Error: %v", err)
+					log.Printf("[ERROR] Schemaless: Error: %v", err)
 				} else {
 					jsonParsed[k] = jsonParsed2
 				}
@@ -313,9 +313,7 @@ func YamlConvert(startValue string) (string, error) {
 		return "", err
 	}
 
-	log.Printf("\n\nYAML INPUT!\n\n")
 	body = YamlToJson(body)
-	log.Printf("startValue: %v", startValue)
 
 	if b, err := json.MarshalIndent(body, "", "\t"); err != nil {
 		fmt.Printf("Error: %v\n", err)
@@ -345,11 +343,11 @@ func SaveTranslation(inputStandard, gptTranslated string) error {
 
 	// Write the translated value
 	if _, err := f.Write([]byte(gptTranslated)); err != nil {
-		log.Printf("[ERROR] Error writing to file %s: %v", filename, err)
+		log.Printf("[ERROR] Schemaless: Error writing to file %s: %v", filename, err)
 		return err
 	}
 
-	log.Printf("[INFO] Translation saved to %s", filename)
+	log.Printf("[INFO] Schemaless: Translation saved to %s", filename)
 	return nil
 }
 
@@ -360,17 +358,17 @@ func SaveParsedInput(inputStandard string, gptTranslated []byte) error {
 	// Open the file
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		//log.Printf("[ERROR] Error opening file %s (3): %v", filename, err)
+		//log.Printf("[ERROR] Schemaless: Error opening file %s (3): %v", filename, err)
 		return err
 	}
 
 	// Write the translated value
 	if _, err := f.Write(gptTranslated); err != nil {
-		log.Printf("[ERROR] Error writing to file %s: %v", filename, err)
+		log.Printf("[ERROR] Schemaless: Error writing to file %s: %v", filename, err)
 		return err
 	}
 
-	log.Printf("[INFO] Translation saved to %s", filename)
+	log.Printf("[INFO] Schemaless: Translation saved to %s", filename)
 	return nil
 }
 
@@ -379,14 +377,14 @@ func GetStandard(inputStandard string) ([]byte, error) {
 	filename := fmt.Sprintf("standards/%s.json", inputStandard)
 	jsonFile, err := os.Open(filename)
 	if err != nil {
-		//log.Printf("[ERROR] Error opening file %s (4): %v", filename, err)
+		//log.Printf("[ERROR] Schemaless: Error opening file %s (4): %v", filename, err)
 		return []byte{}, err
 	}
 
 	// Read the file into a byte array
 	byteValue, err  := ioutil.ReadAll(jsonFile)
 	if err != nil {
-		log.Printf("[ERROR] Error reading file %s: %v", filename, err)
+		log.Printf("[ERROR] Schemaless: Error reading file %s: %v", filename, err)
 		return []byte{}, err
 	}
 
@@ -398,14 +396,14 @@ func GetExistingStructure(inputStandard string) ([]byte, error) {
 	filename := fmt.Sprintf("examples/%s.json", inputStandard)
 	jsonFile, err := os.Open(filename)
 	if err != nil {
-		//log.Printf("[ERROR] Error opening file %s (5): %v", filename, err)
+		//log.Printf("[ERROR] Schemaless: Error opening file %s (5): %v", filename, err)
 		return []byte{}, err
 	}
 
 	// Read the file into a byte array
 	byteValue, err  := ioutil.ReadAll(jsonFile)
 	if err != nil {
-		log.Printf("[ERROR] Error reading file %s: %v", filename, err)
+		log.Printf("[ERROR] Schemaless: Error reading file %s: %v", filename, err)
 		return []byte{}, err
 	}
 
@@ -457,7 +455,7 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 		if _, ok := v.(map[string]interface{}); ok {
 			foundValue, err := recurseFindKey(v.(map[string]interface{}), strings.Join(keys[1:], "."), depth + 1)
 			if err != nil {
-				log.Printf("Error: %v", err)
+				log.Printf("[ERROR] Schemaless: Error: %v", err)
 			} else {
 				return foundValue, nil
 			}
@@ -474,11 +472,9 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 	var parsedInput map[string]interface{}
 	err := json.Unmarshal(inputValue, &parsedInput)
 	if err != nil {
-		log.Printf("[ERROR] Error in inputValue unmarshal during translation: %v", err)
+		log.Printf("[ERROR] Schemaless: Error in inputValue unmarshal during translation: %v", err)
 		return []byte{}, []byte{}, err
 	}
-
-	log.Printf("parsedInput: %#v", parsedInput)
 
 	// Keeping a copy of the original parsedInput which will be changed
 	modifiedParsedInput := parsedInput
@@ -496,7 +492,7 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 			}
 
 
-			log.Printf("Found field %#v in input", inputKey)
+			//log.Printf("Found field %#v in input", inputKey)
 			modifiedParsedInput[translationKey] = inputValue
 
 			// Add the translated field to the translatedInput
@@ -507,19 +503,18 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 		if !found {
 			if val, ok := translationValue.(string); ok {
 				if strings.Contains(val, ".") {
-					log.Printf("[DEBUG] Digging deeper to find field %#v in input", translationValue)
+					//log.Printf("[DEBUG] Schemaless: Digging deeper to find field %#v in input", translationValue)
 
 					recursed, err := recurseFindKey(parsedInput, translationValue.(string), 0)
 					if err != nil {
-						log.Printf("[ERROR] Error in recurseFindKey for %#v: %v", translationValue, err)
+						log.Printf("[ERROR] Schemaless: Error in recurseFindKey for %#v: %v", translationValue, err)
 					}
 
-					log.Printf("recursed: %#v", recursed)
 					modifiedParsedInput[translationKey] = recursed
 					translatedInput[translationKey] = recursed
 				}
 			} else {
-				log.Printf("[ERROR] Field %#v not found in input", translationValue)
+				log.Printf("[ERROR] Schemaless: Field %#v not found in input", translationValue)
 			}
 		}
 	}
@@ -527,14 +522,14 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 	// Marshal the map[string]interface{} back into a byte
 	translatedOutput, err := json.MarshalIndent(translatedInput, "", "\t")
 	if err != nil {
-		log.Printf("[ERROR] Error in translatedInput marshal: %v", err)
+		log.Printf("[ERROR] Schemaless: Error in translatedInput marshal: %v", err)
 		return []byte{}, []byte{}, err
 	}
 
 	// Marshal the map[string]interface{} back into a byte
 	modifiedOutput, err := json.MarshalIndent(modifiedParsedInput, "", "\t")
 	if err != nil {
-		log.Printf("[ERROR] Error in modifiedParsedInput marshal: %v", err)
+		log.Printf("[ERROR] Schemaless: Error in modifiedParsedInput marshal: %v", err)
 		return translatedOutput, []byte{}, err 
 	}
 
@@ -546,16 +541,16 @@ func fixPaths() {
 	folders := []string{"examples", "standards", "input", "queries"}
 	for _, folder := range folders {
 		if _, err := os.Stat(folder); os.IsNotExist(err) {
-			log.Printf("[INFO] Folder %s does not exist, creating it", folder)
+			log.Printf("[DEBUG] Schemaless: Folder '%s' does not exist, creating it", folder)
 			os.Mkdir(folder, 0755)
 		}
 	}
 
-	log.Printf("[DEBUG] Folders fixed. The 'Standards' folder has the standards used for translation with GPT. 'Examples' folder contains info about already translated standards.")
+	//log.Printf("[DEBUG] Schemaless: Folders fixed. The 'Standards' folder has the standards used for translation with GPT. 'Examples' folder contains info about already translated standards.")
 }
 
 
-func Translate(ctx context.Context, inputStandard string, inputValue []byte) []byte {
+func Translate(ctx context.Context, inputStandard string, inputValue []byte) ([]byte, error) { 	
 	// Check for paths
 	fixPaths()
 
@@ -564,7 +559,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte) []b
 	if !strings.HasPrefix(startValue, "{") || !strings.HasSuffix(startValue, "}") { 
 		output, err := YamlConvert(startValue)
 		if err != nil {
-			log.Printf("[ERROR] Error: %v", err)
+			log.Printf("[ERROR] Schemaless: %v", err)
 		}
 
 		startValue = output
@@ -573,44 +568,39 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte) []b
 
 	returnJson, keyToken, err := RemoveJsonValues([]byte(startValue), 1)
 	if err != nil {
-		log.Printf("[ERROR] Error: %v", err)
-		return []byte{}
+		log.Printf("[ERROR] Schemaless: %v", err)
+		return []byte{}, err
 	}
 
 	keyToken = fmt.Sprintf("%s:%s", inputStandard, keyToken)
 	keyTokenFile := fmt.Sprintf("%x", md5.Sum([]byte(keyToken)))
 	err = SaveParsedInput(keyTokenFile, returnJson)
 	if err != nil {
-		log.Printf("[ERROR] Error in SaveParsedInput for file %s: %v", keyToken, err)
-		return []byte{}
+		log.Printf("[ERROR] Schemaless: Error in SaveParsedInput for file %s: %v", keyToken, err)
+		return []byte{}, err
 	}
 
-	//log.Printf("[DEBUG] Cleaned up input values: %v", string(returnJson))
-
 	// Check if the keyToken is already in cache and use that translation layer
-
 	inputStructure, err := GetExistingStructure(keyTokenFile)
 	if err != nil {
-		//log.Printf("\n\n[ERROR] Error in getExistingStructure for standard %s: %v\n\n", inputStandard, err)
-
 		// Check if the standard exists at all
 		standardFormat, err := GetStandard(inputStandard)
 		if err != nil {
-			log.Printf("[ERROR] Error in GetStandard for standard %s: %v", inputStandard, err)
-			return []byte{}
+			log.Printf("[ERROR] Schemaless: Error in GetStandard for standard %s: %v", inputStandard, err)
+			return []byte{}, err
 		}
 
 		gptTranslated, err := GptTranslate(keyTokenFile, string(standardFormat), string(returnJson))
 		if err != nil {
-			log.Printf("[ERROR] Error in GptTranslate: %v", err)
-			return []byte{}
+			log.Printf("[ERROR] Schemaless: Error in GptTranslate: %v", err)
+			return []byte{}, err
 		}
 
-		log.Printf("\n\n[DEBUG] GPT translated: %v. Should save this to file in folder 'examples' with filename %s\n\n", string(gptTranslated), keyTokenFile)
+		//log.Printf("\n\n[DEBUG] GPT translated: %v. Should save this to file in folder 'examples' with filename %s\n\n", string(gptTranslated), keyTokenFile)
 		err = SaveTranslation(keyTokenFile, gptTranslated)
 		if err != nil {
 			log.Printf("[ERROR] Error in SaveTranslation: %v", err)
-			return []byte{}
+			return []byte{}, err
 		}
 
 		log.Printf("[DEBUG] Saved translation to file. Should now run OpenAI and set cache!")
@@ -626,7 +616,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte) []b
 	if err != nil {
 		log.Printf("[WARNING] Error in return structure. Should run OpenAI and set cache!")
 	} else {
-		log.Printf("[INFO] Structure received: %v", returnStructure)
+		//log.Printf("[INFO] Structure received: %v", returnStructure)
 	}
 
 	//log.Printf("returnStructure: %#v", returnStructure)
@@ -635,14 +625,14 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte) []b
 	translation, modifiedInput, err := runJsonTranslation(ctx, []byte(startValue), returnStructure)
 	if err != nil {
 		log.Printf("[ERROR] Error in runJsonTranslation: %v", err)
-		return []byte{}
+		return []byte{}, err
 	}  
 
 	_ = modifiedInput
 	//log.Printf("translation: %v", string(translation))
 	//log.Printf("modifiedInput: %v", string(modifiedInput))
 
-	return translation
+	return translation, nil
 }
 
 
