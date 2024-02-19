@@ -377,7 +377,7 @@ func GetStandard(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, err
 	if len(shuffleConfig.URL) > 0 {
 		// Get the standard from shuffle instead, as we are storing standards there in prod
 
-		return FindShuffleFile(inputStandard, "standards", shuffleConfig)
+		return FindShuffleFile(inputStandard, "translation_standards", shuffleConfig)
 	}
 
 	// Open the relevant file
@@ -401,7 +401,7 @@ func GetStandard(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, err
 func GetExistingStructure(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, error) {
 	if len(shuffleConfig.URL) > 0 {
 		// Get the standard from shuffle instead, as we are storing standards there in prod
-		return FindShuffleFile(inputStandard, "translations", shuffleConfig)
+		return FindShuffleFile(inputStandard, "translation_output", shuffleConfig)
 	}
 
 	// Open the relevant file

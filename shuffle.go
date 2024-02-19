@@ -315,8 +315,6 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 		return []byte{}, err
 	}
 
-	log.Printf("\n\nFILE FOR NAME %s: %s\n\n", id, string(body))
-
 	return body, nil
 }
 
@@ -396,7 +394,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		}
 	}
 
-	return []byte{}, errors.New("Failed to find file")
+	return []byte{}, errors.New(fmt.Sprintf("Failed to find translation file matching name '%s' in category '%s'", name, category)) 
 }
 
 // Cache handlers
