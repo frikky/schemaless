@@ -21,7 +21,11 @@ import (
 )
 
 
-func SaveQuery(inputStandard, gptTranslated string) error {
+func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig) error {
+	if len(shuffleConfig.URL) > 0 {
+		return AddShuffleFile(inputStandard, "translation_queries", []byte(gptTranslated), shuffleConfig)
+	}
+
 	// Write it to file in the example folder
 	filename := fmt.Sprintf("queries/%s", inputStandard)
 
@@ -42,7 +46,7 @@ func SaveQuery(inputStandard, gptTranslated string) error {
 	return nil
 }
 
-func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string) (string, error) {
+func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleConfig ShuffleConfig) (string, error) {
 
 	//systemMessage := fmt.Sprintf("Use the this standard format for the output, and neither add things at the start, nor subtract from the end. Only modify the keys. Add ONLY the most relevant matching key, and make sure each key has a value. It NEEDS to be a valid JSON message: %s", standardFormat)
 	//userQuery := fmt.Sprintf(`Use the standard to translate the following input JSON data. If the key is a synonym, matching or similar between the two, add the key of the input to the value of the standard. User Input:\n%s`, inputDataFormat)
@@ -63,7 +67,7 @@ Generate the standard output structure without providing the expected output.
 		return "", errors.New("OPENAI_API_KEY not set")
 	}
 
-	SaveQuery(keyTokenFile, userQuery) 
+	SaveQuery(keyTokenFile, userQuery, shuffleConfig)
 
 	openaiClient := openai.NewClient(os.Getenv("OPENAI_API_KEY"))
 	contentOutput := ""
@@ -318,10 +322,10 @@ func YamlConvert(startValue string) (string, error) {
 }
 
 
-func SaveTranslation(inputStandard, gptTranslated string) error {
-	//if len(gptTranslated) < 3 {
-	//	return nil
-	//}	
+func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig) error {
+	if len(shuffleConfig.URL) > 0 {
+		return AddShuffleFile(inputStandard, "translations", []byte(gptTranslated), shuffleConfig)
+	}
 
 	// Write it to file in the example folder
 	filename := fmt.Sprintf("examples/%s.json", inputStandard)
@@ -343,7 +347,11 @@ func SaveTranslation(inputStandard, gptTranslated string) error {
 	return nil
 }
 
-func SaveParsedInput(inputStandard string, gptTranslated []byte) error {
+func SaveParsedInput(inputStandard string, gptTranslated []byte, shuffleConfig ShuffleConfig) error {
+	if len(shuffleConfig.URL) > 0 {
+		return AddShuffleFile(inputStandard, "translation_input", gptTranslated, shuffleConfig)
+	}
+
 	// Write it to file in the example folder
 	filename := fmt.Sprintf("input/%s", inputStandard)
 
@@ -390,7 +398,12 @@ func GetStandard(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, err
 	return byteValue, nil
 }
 
-func GetExistingStructure(inputStandard string) ([]byte, error) {
+func GetExistingStructure(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, error) {
+	if len(shuffleConfig.URL) > 0 {
+		// Get the standard from shuffle instead, as we are storing standards there in prod
+		return FindShuffleFile(inputStandard, "translations", shuffleConfig)
+	}
+
 	// Open the relevant file
 	filename := fmt.Sprintf("examples/%s.json", inputStandard)
 	jsonFile, err := os.Open(filename)
@@ -566,6 +579,8 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 				shuffleConfig.Authorization = config
 			} else if cnt == 2 {
 				shuffleConfig.OrgId = config
+			} else if cnt == 3 {
+				shuffleConfig.ExecutionId = config
 			} else {
 				log.Printf("[ERROR] Schemaless: Too many arguments for shuffleConfig")
 			}
@@ -597,14 +612,14 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 
 	keyToken = fmt.Sprintf("%s:%s", inputStandard, keyToken)
 	keyTokenFile := fmt.Sprintf("%x", md5.Sum([]byte(keyToken)))
-	err = SaveParsedInput(keyTokenFile, returnJson)
+	err = SaveParsedInput(keyTokenFile, returnJson, shuffleConfig)
 	if err != nil {
 		log.Printf("[ERROR] Schemaless: Error in SaveParsedInput for file %s: %v", keyToken, err)
 		return []byte{}, err
 	}
 
 	// Check if the keyToken is already in cache and use that translation layer
-	inputStructure, err := GetExistingStructure(keyTokenFile)
+	inputStructure, err := GetExistingStructure(keyTokenFile, shuffleConfig)
 	if err != nil {
 		// Check if the standard exists at all
 		standardFormat, err := GetStandard(inputStandard, shuffleConfig)
@@ -613,16 +628,16 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 			return []byte{}, err
 		}
 
-		gptTranslated, err := GptTranslate(keyTokenFile, string(standardFormat), string(returnJson))
+		gptTranslated, err := GptTranslate(keyTokenFile, string(standardFormat), string(returnJson), shuffleConfig)
 		if err != nil {
 			log.Printf("[ERROR] Schemaless: Error in GptTranslate: %v", err)
 			return []byte{}, err
 		}
 
 		//log.Printf("\n\n[DEBUG] GPT translated: %v. Should save this to file in folder 'examples' with filename %s\n\n", string(gptTranslated), keyTokenFile)
-		err = SaveTranslation(keyTokenFile, gptTranslated)
+		err = SaveTranslation(keyTokenFile, gptTranslated, shuffleConfig)
 		if err != nil {
-			log.Printf("[ERROR] Error in SaveTranslation: %v", err)
+			log.Printf("[ERROR] Error in SaveTranslation (3): %v", err)
 			return []byte{}, err
 		}
 

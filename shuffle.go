@@ -2,6 +2,7 @@ package schemaless
 
 import (
 	"crypto/tls"
+	"bytes"
 	"errors"
 	"log"
 	"net/http"
@@ -11,7 +12,9 @@ import (
 	"time"
 	"fmt"
 	"io/ioutil"
-
+	"encoding/json"
+	"mime/multipart"
+	"io"
 
 	"context"
 	"github.com/patrickmn/go-cache"
@@ -24,6 +27,17 @@ var memcached = os.Getenv("SHUFFLE_MEMCACHED")
 var requestCache = cache.New(60*time.Minute, 60*time.Minute)
 
 var maxCacheSize = 1020000
+
+type File struct {
+	Name string `json:"name"`
+	Id string `json:"id"`
+}
+
+type Filestructure struct {
+	Success bool `json:"success"`
+	Namespaces []string `json:"namespaces"`
+	List []File `json:"list"`
+}
 
 // Same as in shuffle-shared to make sure proxies are good
 func GetExternalClient(baseUrl string) *http.Client {
@@ -97,8 +111,213 @@ func GetExternalClient(baseUrl string) *http.Client {
 
 type ShuffleConfig struct {
 	URL string `json:"url"`
-	OrgId string `json:"orgId"`
 	Authorization string `json:"authorization"`
+	OrgId string `json:"orgId"`
+	ExecutionId string `json:"execution_id"`
+}
+
+type FileStructure struct {
+	Filename   string   `json:"filename"`
+	OrgId      string   `json:"org_id"`
+	WorkflowId string   `json:"workflow_id"`
+	Namespace  string   `json:"namespace"`
+	Tags       []string `json:"tags"`
+}
+
+type FileCreateResp struct {
+	Success bool `json:"success"`
+	Id string `json:"id"`
+}
+
+func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleConfig) error { 
+	// func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte, error) {
+	if len(shuffleConfig.URL) < 1 {
+		return errors.New("Shuffle URL not set when adding file")
+	}
+
+	if !strings.Contains(name, "json") {
+		name = fmt.Sprintf("%s.json", name)
+	}
+
+	client := GetExternalClient(shuffleConfig.URL)
+	fileUrl := fmt.Sprintf("%s/api/v1/files/create?unique=true", shuffleConfig.URL)
+	fileData := FileStructure{
+		Filename: name,
+		Namespace: namespace,
+	}
+
+	if len(shuffleConfig.ExecutionId) > 0 {
+		fileUrl += "&execution_id=" + shuffleConfig.ExecutionId
+	}
+
+	fileDataJson, err := json.Marshal(fileData)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(
+		"POST", 
+		fileUrl,
+		bytes.NewBuffer(fileDataJson),
+	)
+
+	if err != nil {
+		return err
+	}
+
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
+	if len(shuffleConfig.OrgId) > 0 {
+		req.Header.Add("OrgId", shuffleConfig.OrgId)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (1): Error getting file %#v from Shuffle backend: %s", name, err)
+		return err
+	}
+
+	if resp.StatusCode != 200 {
+		log.Printf("[ERROR] Schemaless: Bad status code for %s: %s", fileUrl, resp.Status)
+		return errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (2): Error getting file %#v from Shuffle backend: %s", name, err)
+		return err
+	}
+
+	// Unmarshal to FileCreateResp
+	var fileCreateResp FileCreateResp
+	err = json.Unmarshal(body, &fileCreateResp)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (3): Error getting file %#v from Shuffle backend: %s", name, err)
+		return err
+	}
+
+	if !fileCreateResp.Success {
+		log.Printf("[ERROR] Schemaless (4): Error getting file %#v from Shuffle backend: %s", name, string(body))
+		return errors.New(fmt.Sprintf("Failed adding shuffle file: %s", string(body)))
+	}
+
+	// Upload file to the ID
+	fileUploadUrl := fmt.Sprintf("%s/api/v1/files/%s/upload", shuffleConfig.URL, fileCreateResp.Id)
+
+	if len(shuffleConfig.ExecutionId) > 0 {
+		fileUrl += "?execution_id=" + shuffleConfig.ExecutionId
+	}
+
+	// Handle file upload with correct content-type
+	var requestBody bytes.Buffer
+	writer := multipart.NewWriter(&requestBody)
+
+	fileField, err := writer.CreateFormFile("shuffle_file", name)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (5): Error getting file %#v from Shuffle backend: %s", name, err)
+		return err
+	}
+
+	// Create a ReadSeeker from the original data
+	fileReader := bytes.NewReader(data)
+
+	// Copy the data from the reader to the form field
+	_, err = io.Copy(fileField, fileReader)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", name, err)
+		return err
+	}
+
+	// Close the multipart writer
+	writer.Close()
+
+
+    // Create a new form-data field with the original data
+	req, err = http.NewRequest(
+		"POST", 
+		fileUploadUrl, 
+		&requestBody,
+	)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (5): Error getting file %#v from Shuffle backend: %s", name, err)
+		return err
+	}
+
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
+	if len(shuffleConfig.OrgId) > 0 {
+		req.Header.Add("OrgId", shuffleConfig.OrgId)
+	}
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("User-Agent", "schemaless/1.0.0")
+	resp, err = client.Do(req)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", name, err)
+		return err
+	}
+
+	if resp.StatusCode != 200 {
+		log.Printf("[ERROR] Schemaless: Bad status code for %s: %s", fileUploadUrl, resp.Status)
+		return errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
+	}
+
+	body, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (7): Error getting file %#v from Shuffle backend: %s", name, err)
+		return err
+	}
+
+	return nil
+}
+
+func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) {
+	if len(shuffleConfig.URL) < 1 {
+		return []byte{}, errors.New("Shuffle URL not set")
+	}
+
+	client := GetExternalClient(shuffleConfig.URL)
+	fileUrl := fmt.Sprintf("%s/api/v1/files/%s/content", shuffleConfig.URL, id)
+
+	if len(shuffleConfig.ExecutionId) > 0 {
+		fileUrl += "?execution_id=" + shuffleConfig.ExecutionId
+	}
+
+	log.Printf("[DEBUG] Getting file from: %s", fileUrl)
+	req, err := http.NewRequest(
+		"GET", 
+		fileUrl,
+		nil,
+	)
+
+	if err != nil {
+		return []byte{}, err
+	}
+
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
+	if len(shuffleConfig.OrgId) > 0 {
+		req.Header.Add("OrgId", shuffleConfig.OrgId)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (1): Error getting file %#v from Shuffle backend: %s", id, err)
+		return []byte{}, err
+	}
+
+	if resp.StatusCode != 200 {
+		log.Printf("[ERROR] Schemaless: Bad status code for %s: %s", fileUrl, resp.Status)
+		return []byte{}, errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
+	}
+
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (2): Error reading file %#v from Shuffle backend: %s", id, err)
+		return []byte{}, err
+	}
+
+	log.Printf("\n\nFILE FOR NAME %s: %s\n\n", id, string(body))
+
+	return body, nil
 }
 
 // Finds a file in shuffle in a specified category
@@ -107,14 +326,19 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		return []byte{}, errors.New("Shuffle URL not set")
 	}
 
-	log.Printf("\n\n\n[INFO] Schemaless: Finding file %#v in category %#v from Shuffle backend\n\n\n", name, category)
+	log.Printf("[INFO] Schemaless: Finding file %#v in category %#v from Shuffle backend", name, category)
 
 	// 1. Get the category 
 	// 2. Find the file in the category output
 	// 3. Read the file data
 	// 4. Return it
 	client := GetExternalClient(shuffleConfig.URL)
-	categoryUrl := fmt.Sprintf("%s/api/v1/files/namespaces/%s?ids=true", shuffleConfig.URL, category)
+	categoryUrl := fmt.Sprintf("%s/api/v1/files/namespaces/%s?ids=true&filename=%s", shuffleConfig.URL, category, name)
+
+	if len(shuffleConfig.ExecutionId) > 0 {
+		categoryUrl += "?execution_id=" + shuffleConfig.ExecutionId
+	}
+
 	log.Printf("[DEBUG] Getting category from: %s", categoryUrl)
 	req, err := http.NewRequest(
 		"GET", 
@@ -126,7 +350,6 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		return []byte{}, err
 	}
 
-	log.Printf("[DEBUG] Adding authorization header to request: %#v", shuffleConfig.Authorization)
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
 	if len(shuffleConfig.OrgId) > 0 {
 		req.Header.Add("OrgId", shuffleConfig.OrgId)
@@ -134,7 +357,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("[ERROR] Schemaless: Error getting category %#v from Shuffle backend: %s", category, err)
+		log.Printf("[ERROR] Schemaless (3): Error getting category %#v from Shuffle backend: %s", category, err)
 		return []byte{}, err
 	}
 
@@ -145,14 +368,35 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("[ERROR] Schemaless: Error reading category %#v from Shuffle backend: %s", category, err)
+		log.Printf("[ERROR] Schemaless (4): Error reading category %#v from Shuffle backend: %s", category, err)
 		return []byte{}, err
 	}
 
-	log.Printf("\n\n[DEBUG] Parsing response body from: %#v\n\n", string(body))
+	// Unmarshal to Filestructure struct
+	files := Filestructure{}
+	err = json.Unmarshal(body, &files)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (5): Error unmarshalling category %#v from Shuffle backend: %s", category, err)
+		return []byte{}, err
+	}
 
+	name = strings.Replace(name, " ", "_", -1)
+	for _, file := range files.List {
+		filename := strings.Replace(file.Name, " ", "_", -1)
+		if strings.Contains(filename, name) {
+			log.Printf("[DEBUG] Found file %#v in category %#v", filename, category)
 
-	return []byte{}, nil
+			downloadedFile, err := GetShuffleFileById(file.Id, shuffleConfig)
+			if err != nil {
+				log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", name, err)
+				return []byte{}, err
+			}
+
+			return downloadedFile, nil
+		}
+	}
+
+	return []byte{}, errors.New("Failed to find file")
 }
 
 // Cache handlers
@@ -391,3 +635,4 @@ func SetCache(ctx context.Context, name string, data []byte, expiration int32) e
 
 	return nil
 }
+
