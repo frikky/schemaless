@@ -177,7 +177,7 @@ func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleCo
 	}
 
 	if resp.StatusCode != 200 {
-		log.Printf("[ERROR] Schemaless: Bad status code for %s: %s", fileUrl, resp.Status)
+		log.Printf("[ERROR] Schemaless: Bad status code (3) for %s: %s", fileUrl, resp.Status)
 		return errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
 	}
 
@@ -204,7 +204,7 @@ func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleCo
 	fileUploadUrl := fmt.Sprintf("%s/api/v1/files/%s/upload", shuffleConfig.URL, fileCreateResp.Id)
 
 	if len(shuffleConfig.ExecutionId) > 0 {
-		fileUrl += "?execution_id=" + shuffleConfig.ExecutionId
+		fileUploadUrl += "?execution_id=" + shuffleConfig.ExecutionId
 	}
 
 	// Handle file upload with correct content-type
@@ -256,7 +256,7 @@ func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleCo
 	}
 
 	if resp.StatusCode != 200 {
-		log.Printf("[ERROR] Schemaless: Bad status code for %s: %s", fileUploadUrl, resp.Status)
+		log.Printf("[ERROR] Schemaless: Bad status code (4) for %s: %s", fileUploadUrl, resp.Status)
 		return errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
 	}
 
@@ -304,7 +304,7 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 	}
 
 	if resp.StatusCode != 200 {
-		log.Printf("[ERROR] Schemaless: Bad status code for %s: %s", fileUrl, resp.Status)
+		log.Printf("[ERROR] Schemaless: Bad status code (1) for %s: %s", fileUrl, resp.Status)
 		return []byte{}, errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
 	}
 
@@ -336,7 +336,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 	categoryUrl := fmt.Sprintf("%s/api/v1/files/namespaces/%s?ids=true&filename=%s", shuffleConfig.URL, category, name)
 
 	if len(shuffleConfig.ExecutionId) > 0 {
-		categoryUrl += "?execution_id=" + shuffleConfig.ExecutionId
+		categoryUrl += "&execution_id=" + shuffleConfig.ExecutionId
 	}
 
 	log.Printf("[DEBUG] Getting category from: %s", categoryUrl)
@@ -362,7 +362,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 	}
 
 	if resp.StatusCode != 200 {
-		log.Printf("[ERROR] Schemaless: Bad status code getting category %#v from Shuffle backend: %s", category, resp.Status)
+		log.Printf("[ERROR] Schemaless: Bad status code (2) getting category %#v from Shuffle backend %#v: %s", category, categoryUrl, resp.Status)
 		return []byte{}, errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
 	}
 
