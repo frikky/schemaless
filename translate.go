@@ -23,7 +23,7 @@ import (
 
 func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig) error {
 	if len(shuffleConfig.URL) > 0 {
-		return AddShuffleFile(inputStandard, "translation_queries", []byte(gptTranslated), shuffleConfig)
+		return AddShuffleFile(inputStandard, "translation_ai_queries", []byte(gptTranslated), shuffleConfig)
 	}
 
 	// Write it to file in the example folder
@@ -64,7 +64,7 @@ Generate the standard output structure without providing the expected output.
 
 
 	if len(os.Getenv("OPENAI_API_KEY")) == 0 {
-		return "", errors.New("OPENAI_API_KEY not set")
+		return standardFormat, errors.New("OPENAI_API_KEY not set")
 	}
 
 	SaveQuery(keyTokenFile, userQuery, shuffleConfig)
@@ -76,7 +76,7 @@ Generate the standard output structure without providing the expected output.
 		if cnt >= 5 {
 			log.Printf("[ERROR] Schemaless: Failed to match Formatting in standard translation after 5 tries. Returning empty string.")
 
-			return "", errors.New("Failed to match Formatting in standard translation after 5 tries")
+			return standardFormat, errors.New("Failed to match Formatting in standard translation after 5 tries")
 		}
 
 		openaiResp2, err := openaiClient.CreateChatCompletion(
@@ -109,11 +109,6 @@ Generate the standard output structure without providing the expected output.
 	}
 
 	return contentOutput, nil
-	//return `{
-	//	"message": "title",
-	//	"subject": "description",
-	//	"identifier": "id"
-	//}`, nil
 }
 
 func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[string]interface{}, error) {
@@ -132,7 +127,7 @@ func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[strin
 	cacheData := []byte(returnCache.([]uint8))
 	err = json.Unmarshal(cacheData, &returnStructure)
 	if err != nil {
-		log.Printf("[ERROR] Schemaless: Failed to unmarshal from cache: %s. Value: %s", err, cacheData)
+		log.Printf("[ERROR] Schemaless: Failed to unmarshal from cache key %s: %s. Value: %s", inputKeyTokenMd5, err, cacheData)
 		return returnStructure, err
 	}
 
@@ -324,7 +319,7 @@ func YamlConvert(startValue string) (string, error) {
 
 func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig) error {
 	if len(shuffleConfig.URL) > 0 {
-		return AddShuffleFile(inputStandard, "translations", []byte(gptTranslated), shuffleConfig)
+		return AddShuffleFile(inputStandard, "translation_output", []byte(gptTranslated), shuffleConfig)
 	}
 
 	// Write it to file in the example folder
@@ -631,6 +626,13 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		gptTranslated, err := GptTranslate(keyTokenFile, string(standardFormat), string(returnJson), shuffleConfig)
 		if err != nil {
 			log.Printf("[ERROR] Schemaless: Error in GptTranslate: %v", err)
+
+			// FIXME: Should make the file anyway, as to make it manually editable
+			if strings.Contains(fmt.Sprintf("%s", err), "OPENAI") {
+				log.Printf("[DEBUG] Saving standard even though no OPENAI key is supplied")
+				SaveTranslation(keyTokenFile, gptTranslated, shuffleConfig)
+			}
+
 			return []byte{}, err
 		}
 
