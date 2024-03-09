@@ -214,14 +214,14 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 					_ = newKeyToken
 
 					if err != nil {
-						log.Printf("[ERROR] Schemaless: Error: %v", err)
+						log.Printf("[ERROR] Schemaless (1): %v", err)
 					} else {
 						//log.Printf("returnJson (1): %v", string(returnJson))
 						// Unmarshal the byte back into a map[string]interface{}
 						var jsonParsed2 map[string]interface{}
 						err := json.Unmarshal(returnJson, &jsonParsed2)
 						if err != nil {
-							log.Printf("[ERROR] Schemaless: Error: %v", err)
+							log.Printf("[ERROR] Schemaless (2): %v", err)
 						} else {
 							newListItem = append(newListItem, jsonParsed2)
 						}
@@ -264,14 +264,14 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 			}
 
 			if err != nil {
-				log.Printf("[ERROR] Schemaless: Error: %v", err)
+				log.Printf("[ERROR] Schemaless (3): %v", err)
 			} else {
 				//log.Printf("returnJson (2): %v", string(returnJson))
 				// Unmarshal the byte back into a map[string]interface{}
 				var jsonParsed2 map[string]interface{}
 				err := json.Unmarshal(returnJson, &jsonParsed2)
 				if err != nil {
-					log.Printf("[ERROR] Schemaless: Error: %v", err)
+					log.Printf("[ERROR] Schemaless (4): %v", err)
 				} else {
 					jsonParsed[k] = jsonParsed2
 				}
@@ -307,7 +307,7 @@ func YamlConvert(startValue string) (string, error) {
 	body = YamlToJson(body)
 
 	if b, err := json.MarshalIndent(body, "", "\t"); err != nil {
-		fmt.Printf("Error: %v\n", err)
+		fmt.Printf("[ERROR} Yaml conversion problem: %v\n", err)
 		return "", err
 	} else {
 		startValue = string(b)
@@ -462,7 +462,7 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 		if _, ok := v.(map[string]interface{}); ok {
 			foundValue, err := recurseFindKey(v.(map[string]interface{}), strings.Join(keys[1:], "."), depth + 1)
 			if err != nil {
-				log.Printf("[ERROR] Schemaless: Error: %v", err)
+				log.Printf("[ERROR] Schemaless (5): %v", err)
 			} else {
 				return foundValue, nil
 			}
