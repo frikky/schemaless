@@ -3,6 +3,12 @@ module backendtest
 go 1.20
 
 require (
+	github.com/frikky/schemaless v0.0.7
+	github.com/gorilla/mux v1.8.1
+	github.com/shuffle/shuffle-shared v0.5.70
+)
+
+require (
 	cloud.google.com/go v0.75.0 // indirect
 	cloud.google.com/go/datastore v1.4.0 // indirect
 	cloud.google.com/go/storage v1.12.0 // indirect
@@ -18,7 +24,6 @@ require (
 	github.com/cyphar/filepath-securejoin v0.2.4 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/frikky/kin-openapi v0.41.0 // indirect
-	github.com/frikky/schemaless v0.0.7 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.5.0 // indirect
@@ -31,7 +36,6 @@ require (
 	github.com/google/go-github/v28 v28.1.1 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/googleapis/gax-go/v2 v2.0.5 // indirect
-	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/jstemmer/go-junit-report v0.9.1 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
@@ -43,7 +47,6 @@ require (
 	github.com/sashabaranov/go-openai v1.19.2 // indirect
 	github.com/satori/go.uuid v1.2.0 // indirect
 	github.com/sergi/go-diff v1.1.0 // indirect
-	github.com/shuffle/shuffle-shared v0.5.70 // indirect
 	github.com/skeema/knownhosts v1.2.1 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
@@ -61,7 +64,7 @@ require (
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/genproto v0.0.0-20210113195801-ae06605f4595 // indirect
 	google.golang.org/grpc v1.34.1 // indirect
-	google.golang.org/protobuf v1.28.0 // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
