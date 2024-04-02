@@ -31,6 +31,7 @@ var maxCacheSize = 1020000
 type File struct {
 	Name string `json:"name"`
 	Id string `json:"id"`
+	Status string `json:"status"`
 }
 
 type Filestructure struct {
@@ -125,8 +126,9 @@ type FileStructure struct {
 }
 
 type FileCreateResp struct {
-	Success bool `json:"success"`
-	Id string `json:"id"`
+	Success   bool `json:"success"`
+	Id 		  string `json:"id"`
+	Duplicate bool `json:"duplicate"`
 }
 
 func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleConfig) error { 
@@ -198,6 +200,11 @@ func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleCo
 	if !fileCreateResp.Success {
 		log.Printf("[ERROR] Schemaless (4): Error getting file %#v from Shuffle backend: %s", name, string(body))
 		return errors.New(fmt.Sprintf("Failed adding shuffle file: %s", string(body)))
+	}
+
+	if fileCreateResp.Duplicate {
+		//log.Printf("[INFO] Schemaless: File %#v already exists in Shuffle", name)
+		return nil
 	}
 
 	// Upload file to the ID
@@ -281,7 +288,7 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 		fileUrl += "?execution_id=" + shuffleConfig.ExecutionId
 	}
 
-	log.Printf("[DEBUG] Getting file from: %s", fileUrl)
+	//log.Printf("[DEBUG] Getting file from: %s", fileUrl)
 	req, err := http.NewRequest(
 		"GET", 
 		fileUrl,
@@ -305,7 +312,7 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 
 	if resp.StatusCode != 200 {
 		log.Printf("[ERROR] Schemaless: Bad status code (1) for %s: %s", fileUrl, resp.Status)
-		return []byte{}, errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
+		return []byte{}, errors.New(fmt.Sprintf("Bad status code when downloading file %s: %s", id, resp.Status))
 	}
 
 	defer resp.Body.Close()
@@ -378,11 +385,24 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		return []byte{}, err
 	}
 
-	name = strings.Replace(name, " ", "_", -1)
+	name = strings.TrimSpace(strings.ToLower(strings.Replace(name, " ", "_", -1)))
+	if strings.HasSuffix(name, ".json") {
+		name = name[:len(name)-5]
+	}
+
 	for _, file := range files.List {
-		filename := strings.Replace(file.Name, " ", "_", -1)
-		if strings.Contains(filename, name) {
-			log.Printf("[DEBUG] Found file %#v in category %#v", filename, category)
+		if file.Status != "active" {
+			continue
+		}
+
+		filename := strings.TrimSpace(strings.ToLower(strings.Replace(file.Name, " ", "_", -1)))
+		if strings.HasSuffix(filename, ".json") {
+			filename = filename[:len(filename)-5]
+		}
+
+		//if strings.Contains(filename, name) {
+		if filename == name { 
+			//log.Printf("\n\n[DEBUG] Found file %#v in category %#v. ID: %#v, Status: %#v\n\n", filename, category, file.Id, file.Status)
 
 			downloadedFile, err := GetShuffleFileById(file.Id, shuffleConfig)
 			if err != nil {

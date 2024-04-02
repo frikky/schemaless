@@ -14,12 +14,13 @@ import (
 	"encoding/json"
 
     "gopkg.in/yaml.v3"
-	//"github.com/shuffle/shuffle-shared"
 	openai "github.com/sashabaranov/go-openai"
 
 	"context"
 )
 
+var chosenModel = "gpt-4-turbo-preview"
+var maxInputSize = 4000
 
 func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig) error {
 	if len(shuffleConfig.URL) > 0 {
@@ -51,20 +52,18 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleC
 	//systemMessage := fmt.Sprintf("Use the this standard format for the output, and neither add things at the start, nor subtract from the end. Only modify the keys. Add ONLY the most relevant matching key, and make sure each key has a value. It NEEDS to be a valid JSON message: %s", standardFormat)
 	//userQuery := fmt.Sprintf(`Use the standard to translate the following input JSON data. If the key is a synonym, matching or similar between the two, add the key of the input to the value of the standard. User Input:\n%s`, inputDataFormat)
 
-	systemMessage := fmt.Sprintf("Ensure the output is valid JSON, and does NOT add more keys to the standard. Make sure each key in the standard has a value from the user input. If values are nested, ALWAYS add the nested value in jq format such as 'secret.version.value'")
-	userQuery := fmt.Sprintf(`Translate the given user input JSON structure to a standard format. Use the values from the standard to guide you what to look for. The standard format should follow the pattern:
+	systemMessage := fmt.Sprintf("Ensure the output is valid JSON, and does NOT add more keys to the standard. Make sure each key in the standard has a value from the user input. If values are nested, ALWAYS add the nested value in jq format such as 'secret.version.value'. Example: If the standard is ```{\"id\": \"The id of the ticket\", \"title\": \"The ticket title\"}```, and the user input is ```{\"key\": \"12345\", \"fields:\": {\"summary\": \"The title of the ticket\"}}```, the output should be ```{\"id\": \"key\", \"title\": \"fields.summary\"}```")
 
-%s
+	log.Printf("[DEBUG] Schemaless: Running GPT with system message: %s", systemMessage)
 
-User Input:
-%s
-
-Generate the standard output structure without providing the expected output.
-`, standardFormat, inputDataFormat)
-
+	userQuery := fmt.Sprintf("Translate the given user input JSON structure to a standard format. Use the values from the standard to guide you what to look for. The standard format should follow the pattern:\n\n```json\n%s\n```\n\nUser Input:\n```json\n%s\n```\n\nGenerate the standard output structure without providing the expected output.", standardFormat, inputDataFormat)
 
 	if len(os.Getenv("OPENAI_API_KEY")) == 0 {
 		return standardFormat, errors.New("OPENAI_API_KEY not set")
+	}
+
+	if len(inputDataFormat) > maxInputSize {
+		return standardFormat, errors.New(fmt.Sprintf("Input data too long. Max is %d. Current is %d", maxInputSize, len(inputDataFormat)))
 	}
 
 	SaveQuery(keyTokenFile, userQuery, shuffleConfig)
@@ -82,7 +81,7 @@ Generate the standard output structure without providing the expected output.
 		openaiResp2, err := openaiClient.CreateChatCompletion(
 			context.Background(),
 			openai.ChatCompletionRequest{
-				Model: "gpt-4",
+				Model: chosenModel,
 				Messages: []openai.ChatCompletionMessage{
 					{
 						Role:    openai.ChatMessageRoleSystem,
@@ -122,10 +121,13 @@ func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[strin
 		return returnStructure, err
 	}
 
+
 	// Setting the structure AGAIN to make it not time out
 	//cache, err := GetCache(ctx, cacheKey)
 	cacheData := []byte(returnCache.([]uint8))
-	err = json.Unmarshal(cacheData, &returnStructure)
+	fixedCache := FixTranslationStructure(string(cacheData)) 
+
+	err = json.Unmarshal([]byte(fixedCache), &returnStructure)
 	if err != nil {
 		log.Printf("[ERROR] Schemaless: Failed to unmarshal from cache key %s: %s. Value: %s", inputKeyTokenMd5, err, cacheData)
 		return returnStructure, err
@@ -184,6 +186,8 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 	// Sort the keys so we can iterate over them in order
 	keys := make([]string, 0, len(jsonParsed))
 	for k := range jsonParsed {
+		// If key ends with a number, remove it (usually only used for custom fields. FIXME: This WILL cause edge-case problems)
+
 		keys = append(keys, k)
 	}
 
@@ -191,6 +195,10 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 
 	// Iterate over the map[string]interface{} and remove the values 
 	for _, k := range keys {
+		if strings.HasSuffix(k, "1") || strings.HasSuffix(k, "2") || strings.HasSuffix(k, "3") || strings.HasSuffix(k, "4") || strings.HasSuffix(k, "5") || strings.HasSuffix(k, "6") || strings.HasSuffix(k, "7") || strings.HasSuffix(k, "8") || strings.HasSuffix(k, "9") || strings.HasSuffix(k, "0") {
+			continue
+		}
+
 		keyToken += k
 		// Get the value of the key as a map[string]interface{}
 		//log.Printf("k: %v, %#v", k, jsonParsed[k])
@@ -288,6 +296,13 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 		//}
 	}
 
+	for k, _ := range jsonParsed {
+		if strings.HasSuffix(k, "1") || strings.HasSuffix(k, "2") || strings.HasSuffix(k, "3") || strings.HasSuffix(k, "4") || strings.HasSuffix(k, "5") || strings.HasSuffix(k, "6") || strings.HasSuffix(k, "7") || strings.HasSuffix(k, "8") || strings.HasSuffix(k, "9") || strings.HasSuffix(k, "0") {
+			// Remove the key
+			delete(jsonParsed, k)
+		}
+	}
+
 	// Marshal the map[string]interface{} back into a byte
 	input, err = json.MarshalIndent(jsonParsed, "", "\t")
 	if err != nil {
@@ -317,7 +332,30 @@ func YamlConvert(startValue string) (string, error) {
 }
 
 
+func FixTranslationStructure(gptTranslated string) string {
+	gptTranslated = strings.TrimSpace(gptTranslated)
+
+	if strings.HasPrefix(gptTranslated, "```") {
+		if strings.Contains(gptTranslated, "```json") {
+			gptTranslated = strings.TrimPrefix(gptTranslated, "```json")
+		} else {
+			gptTranslated = strings.TrimPrefix(gptTranslated, "```")
+		}
+
+		if strings.HasSuffix(gptTranslated, "```") {
+			gptTranslated = strings.TrimSuffix(gptTranslated, "```")
+		}
+
+		gptTranslated = strings.TrimSpace(gptTranslated)
+	}
+	
+	return gptTranslated
+}
+
 func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig) error {
+	// Check if the data starts with ``` or ```json and ends with ``` or ```json
+	gptTranslated = FixTranslationStructure(gptTranslated)
+
 	if len(shuffleConfig.URL) > 0 {
 		return AddShuffleFile(inputStandard, "translation_output", []byte(gptTranslated), shuffleConfig)
 	}
@@ -369,10 +407,15 @@ func SaveParsedInput(inputStandard string, gptTranslated []byte, shuffleConfig S
 
 
 func GetStandard(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, error) {
+
 	if len(shuffleConfig.URL) > 0 {
 		// Get the standard from shuffle instead, as we are storing standards there in prod
 
 		return FindShuffleFile(inputStandard, "translation_standards", shuffleConfig)
+	}
+
+	if strings.HasSuffix(inputStandard, ".json") {
+		inputStandard = strings.TrimSuffix(inputStandard, ".json")
 	}
 
 	// Open the relevant file
@@ -556,6 +599,82 @@ func fixPaths() {
 	//log.Printf("[DEBUG] Schemaless: Folders fixed. The 'Standards' folder has the standards used for translation with GPT. 'Examples' folder contains info about already translated standards.")
 }
 
+func handleSubStandard(ctx context.Context, subStandard string, returnJson string, authConfig string) ([]byte, error) {
+	log.Printf("[DEBUG] Schemaless: Finding substandard for standard '%s'", subStandard)
+
+	// 1. Check if the original returnJson is a list
+	// 2. If it doesn't HAVE a list, find a list in the data
+	// 3. For each item in the list, translate it to the substandard
+
+	// List with JSON inside it
+	listJson := []interface{}{}
+	err := json.Unmarshal([]byte(returnJson), &listJson)
+	if err != nil {
+		if !strings.Contains(fmt.Sprintf("%v", err), "cannot unmarshal") { 
+			log.Printf("[ERROR] Schemaless: Error in unmarshal of returnJson in sub to a direct list: %v", err)
+		}
+
+		// Map it to a map[string]interface{} instead
+		var mapJson map[string]interface{}
+		err = json.Unmarshal([]byte(returnJson), &mapJson)
+		if err != nil {
+			log.Printf("[ERROR] Schemaless: Error in unmarshal of returnJson in sub to a map: %v", err)
+			return []byte{}, err
+		}
+
+		for k, v := range mapJson {
+			if _, ok := v.([]interface{}); ok {
+				log.Printf("[DEBUG] Schemaless: Found a list in the mapJson. Should translate each item to the substandard. Key: %s", k)
+				listJson = v.([]interface{})
+				break
+			}
+		}
+	}
+
+	if len(listJson) == 0 {
+		return []byte{}, errors.New("No list key found in the sub body (1 LEVEL ONLY). No parsing to be done")
+	}
+
+	log.Printf("[DEBUG] Schemaless: Found a list of length %d in the returnJson. Should translate each item to the substandard", len(listJson))
+
+	// For each item in the list, translate it to the substandard
+	// Maybe do this with recursive Translate() calls?
+	parsedOutput := [][]byte{}
+	for cnt, listItem := range listJson {
+		marshalledBody, err := json.Marshal(listItem)
+		if err != nil {
+			log.Printf("[ERROR] Schemaless: Error in marshalling of list item: %v", err)
+			continue
+		}
+
+		// FIXME: Override the reference file after it has been successful for one?
+		schemalessOutput, err := Translate(ctx, subStandard, marshalledBody, authConfig, "skip_substandard")
+		if err != nil {
+			log.Printf("[ERROR] Schemaless: Error in schemaless.Translate for sub list item: %v", err)
+			continue
+		}
+
+		//log.Printf("\n\n[DEBUG] Got SUB translation output: %v\n\n", string(schemalessOutput))
+		parsedOutput = append(parsedOutput, schemalessOutput)
+		if cnt > 10 {
+			break
+		}
+	}
+
+	// Make the [][]byte into a []byte
+	finalOutput := []byte("[")
+	for cnt, output := range parsedOutput {
+		if cnt > 0 {
+			finalOutput = append(finalOutput, []byte(",")...)
+		}
+
+		finalOutput = append(finalOutput, output...)
+	}
+
+	finalOutput = append(finalOutput, []byte("]")...)
+	return finalOutput, nil
+}
+
 // Add optional argument for whether to use shuffle files or not
 func Translate(ctx context.Context, inputStandard string, inputValue []byte, inputConfig ...string) ([]byte, error) {
 
@@ -598,29 +717,81 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		startValue = output
 	}
 
-
 	returnJson, keyToken, err := RemoveJsonValues([]byte(startValue), 1)
 	if err != nil {
 		log.Printf("[ERROR] Schemaless json removal (2): %v", err)
 		return []byte{}, err
 	}
 
-	keyToken = fmt.Sprintf("%s:%s", inputStandard, keyToken)
-	keyTokenFile := fmt.Sprintf("%x", md5.Sum([]byte(keyToken)))
+	// Used to handle recursion and weird names
+	if strings.HasSuffix(inputStandard, ".json") {
+		inputStandard = strings.TrimSuffix(inputStandard, ".json")
+	}
+
+	//keyToken = fmt.Sprintf("%s:%s", inputStandard, keyToken)
+	keyTokenFile := fmt.Sprintf("%s-%x", inputStandard, md5.Sum([]byte(keyToken)))
 	err = SaveParsedInput(keyTokenFile, returnJson, shuffleConfig)
 	if err != nil {
-		log.Printf("[ERROR] Schemaless: Error in SaveParsedInput for file %s: %v", keyToken, err)
+		log.Printf("[ERROR] Schemaless: Error in SaveParsedInput for file %s: '%v'", keyTokenFile, err)
 		return []byte{}, err
 	}
 
+	// FIXME: May not be important anymore 
+	// This prevents recursion inside a JSON blob
+	// in case file reference is bad
+	skipSubstandard := false
+	for _, input := range inputConfig { 
+		if input == "skip_substandard" {
+			skipSubstandard = true
+			break
+		}
+	}
+
 	// Check if the keyToken is already in cache and use that translation layer
+	//log.Printf("\n\n[DEBUG] Schemaless: Getting existing structure for keyToken: '%s'\n\n", keyTokenFile)
 	inputStructure, err := GetExistingStructure(keyTokenFile, shuffleConfig)
-	if err != nil {
+	fixedOutput := FixTranslationStructure(string(inputStructure))
+	inputStructure = []byte(fixedOutput)
+
+	if err == nil {
+		//log.Printf("\n\n[DEBUG] Schemaless: Found existing structure for keyToken: '%s': %#v\n\n", keyTokenFile, string(inputStructure))
+	} else {
 		// Check if the standard exists at all
 		standardFormat, err := GetStandard(inputStandard, shuffleConfig)
 		if err != nil {
 			log.Printf("[ERROR] Schemaless: Error in GetStandard for standard %#v: %v", inputStandard, err)
 			return []byte{}, err
+		}
+
+		//log.Printf("\n\nFOUND STANDARD (%s): %v\n\n", inputStandard, string(standardFormat))
+
+		trimmedStandard := strings.TrimSpace(string(standardFormat))
+		if !skipSubstandard && len(trimmedStandard) > 2 && strings.Contains(trimmedStandard, ".json") && strings.HasPrefix(trimmedStandard, "[") && strings.HasSuffix(trimmedStandard, "]") {
+
+			standardName := strings.TrimSuffix(strings.TrimPrefix(trimmedStandard, "["), "]")
+			log.Printf("[DEBUG] Schemaless: Found a JSON array in the standard. Should convert it to a map[string]interface{}. Name: %s", standardName)
+			_, err := GetStandard(standardName, shuffleConfig)
+			if err != nil {
+				log.Printf("[ERROR] Schemaless: Error in GetSubStandard for standard %#v used for lists/standard references references: %v", standardName, err)
+				return []byte{}, err
+			}
+
+			//log.Printf("\n\nFOUND SUBSTANDARD (%s): %v\n\n", standardName, string(subStandard))
+			// FIXME: Find the list in the inputdata. Map each item to the substandard, and then return the list
+
+			foundConfig := ""
+			if len(inputConfig) > 0 {
+				foundConfig = inputConfig[0]
+			}
+
+			resp, err := handleSubStandard(ctx, standardName, startValue, foundConfig)
+			if err != nil {
+				log.Printf("[ERROR] Schemaless: Error in handleSubStandard: %v", err)
+			} else {
+				return resp, nil
+			}
+
+			return []byte{}, errors.New("Finding substandard and list parsing")
 		}
 
 		gptTranslated, err := GptTranslate(keyTokenFile, string(standardFormat), string(returnJson), shuffleConfig)
@@ -659,8 +830,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		//log.Printf("[INFO] Structure received: %v", returnStructure)
 	}
 
-	//log.Printf("returnStructure: %#v", returnStructure)
-	//log.Printf("keyToken: %v", keyToken)
+	//log.Printf("[DEBUG] Structure received: %v", returnStructure)
 
 	translation, modifiedInput, err := runJsonTranslation(ctx, []byte(startValue), returnStructure)
 	if err != nil {
