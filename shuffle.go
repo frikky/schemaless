@@ -169,7 +169,7 @@ func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleCo
 
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
 	if len(shuffleConfig.OrgId) > 0 {
-		req.Header.Add("OrgId", shuffleConfig.OrgId)
+		req.Header.Add("Org-Id", shuffleConfig.OrgId)
 	}
 
 	resp, err := client.Do(req)
@@ -251,7 +251,7 @@ func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleCo
 
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
 	if len(shuffleConfig.OrgId) > 0 {
-		req.Header.Add("OrgId", shuffleConfig.OrgId)
+		req.Header.Add("Org-Id", shuffleConfig.OrgId)
 	}
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -301,7 +301,7 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
 	if len(shuffleConfig.OrgId) > 0 {
-		req.Header.Add("OrgId", shuffleConfig.OrgId)
+		req.Header.Add("Org-Id", shuffleConfig.OrgId)
 	}
 
 	resp, err := client.Do(req)
@@ -357,7 +357,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
 	if len(shuffleConfig.OrgId) > 0 {
-		req.Header.Add("OrgId", shuffleConfig.OrgId)
+		req.Header.Add("Org-Id", shuffleConfig.OrgId)
 	}
 
 	resp, err := client.Do(req)
