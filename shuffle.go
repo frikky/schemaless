@@ -2,6 +2,8 @@ package schemaless
 
 import (
 	"crypto/tls"
+	"crypto/md5"
+	"encoding/hex"
 	"bytes"
 	"errors"
 	"log"
@@ -284,6 +286,19 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 	client := GetExternalClient(shuffleConfig.URL)
 	fileUrl := fmt.Sprintf("%s/api/v1/files/%s/content", shuffleConfig.URL, id)
 
+	ctx := context.Background()
+	var body []byte
+
+	hasher := md5.New()
+	hasher.Write([]byte(fileUrl+shuffleConfig.Authorization+shuffleConfig.OrgId+shuffleConfig.ExecutionId))
+	cacheKey := hex.EncodeToString(hasher.Sum(nil))
+
+	cache, err := GetCache(ctx, cacheKey)
+	if err == nil {
+		body = []byte(cache.([]uint8))
+		return body, nil
+	}
+
 	if len(shuffleConfig.ExecutionId) > 0 {
 		fileUrl += "?execution_id=" + shuffleConfig.ExecutionId
 	}
@@ -310,16 +325,17 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 		return []byte{}, err
 	}
 
-	if resp.StatusCode != 200 {
-		log.Printf("[ERROR] Schemaless: Bad status code (1) for %s: %s", fileUrl, resp.Status)
-		return []byte{}, errors.New(fmt.Sprintf("Bad status code when downloading file %s: %s", id, resp.Status))
-	}
-
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err = ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("[ERROR] Schemaless (2): Error reading file %#v from Shuffle backend: %s", id, err)
 		return []byte{}, err
+	}
+
+	go SetCache(ctx, cacheKey, body, 60)
+	if resp.StatusCode != 200 {
+		log.Printf("[ERROR] Schemaless: Bad status code (1) for %s: %s", fileUrl, resp.Status)
+		return []byte{}, errors.New(fmt.Sprintf("Bad status code when downloading file %s: %s", id, resp.Status))
 	}
 
 	return body, nil
@@ -331,6 +347,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		return []byte{}, errors.New("Shuffle URL not set")
 	}
 
+
 	log.Printf("[INFO] Schemaless: Finding file %#v in category %#v from Shuffle backend", name, category)
 
 	// 1. Get the category 
@@ -340,41 +357,56 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 	client := GetExternalClient(shuffleConfig.URL)
 	categoryUrl := fmt.Sprintf("%s/api/v1/files/namespaces/%s?ids=true&filename=%s", shuffleConfig.URL, category, name)
 
-	if len(shuffleConfig.ExecutionId) > 0 {
-		categoryUrl += "&execution_id=" + shuffleConfig.ExecutionId
-	}
+	hasher := md5.New()
+	hasher.Write([]byte(categoryUrl+shuffleConfig.Authorization+shuffleConfig.OrgId+shuffleConfig.ExecutionId))
+	cacheKey := hex.EncodeToString(hasher.Sum(nil))
 
-	log.Printf("[DEBUG] Getting category from: %s", categoryUrl)
-	req, err := http.NewRequest(
-		"GET", 
-		categoryUrl,
-		nil,
-	)
+	// Get the cache 
+	ctx := context.Background()
+	var body []byte
+	cache, err := GetCache(ctx, cacheKey)
+	if err == nil {
+		body = []byte(cache.([]uint8))
+		//return cacheData, nil
+	} else {
+		if len(shuffleConfig.ExecutionId) > 0 {
+			categoryUrl += "&execution_id=" + shuffleConfig.ExecutionId
+		}
 
-	if err != nil {
-		return []byte{}, err
-	}
+		log.Printf("[DEBUG] Getting category WITHOUT cache: %s", categoryUrl)
+		req, err := http.NewRequest(
+			"GET", 
+			categoryUrl,
+			nil,
+		)
 
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
-	if len(shuffleConfig.OrgId) > 0 {
-		req.Header.Add("Org-Id", shuffleConfig.OrgId)
-	}
+		if err != nil {
+			return []byte{}, err
+		}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("[ERROR] Schemaless (3): Error getting category %#v from Shuffle backend: %s", category, err)
-		return []byte{}, err
-	}
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
+		if len(shuffleConfig.OrgId) > 0 {
+			req.Header.Add("Org-Id", shuffleConfig.OrgId)
+		}
 
-	if resp.StatusCode != 200 {
-		log.Printf("[ERROR] Schemaless: Bad status code (2) getting category %#v from Shuffle backend %#v: %s", category, categoryUrl, resp.Status)
-		return []byte{}, errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
-	}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("[ERROR] Schemaless (3): Error getting category %#v from Shuffle backend: %s", category, err)
+			return []byte{}, err
+		}
 
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("[ERROR] Schemaless (4): Error reading category %#v from Shuffle backend: %s", category, err)
-		return []byte{}, err
+
+		body, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("[ERROR] Schemaless (4): Error reading category %#v from Shuffle backend: %s", category, err)
+			return []byte{}, err
+		}
+
+		go SetCache(ctx, cacheKey, body, 3)
+		if resp.StatusCode != 200 {
+			log.Printf("[ERROR] Schemaless: Bad status code (2) getting category %#v from Shuffle backend %#v: %s", category, categoryUrl, resp.Status)
+			return []byte{}, errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
+		}
 	}
 
 	// Unmarshal to Filestructure struct
@@ -390,6 +422,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		name = name[:len(name)-5]
 	}
 
+
 	for _, file := range files.List {
 		if file.Status != "active" {
 			continue
@@ -401,17 +434,19 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		}
 
 		//if strings.Contains(filename, name) {
-		if filename == name { 
-			//log.Printf("\n\n[DEBUG] Found file %#v in category %#v. ID: %#v, Status: %#v\n\n", filename, category, file.Id, file.Status)
-
-			downloadedFile, err := GetShuffleFileById(file.Id, shuffleConfig)
-			if err != nil {
-				log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", name, err)
-				return []byte{}, err
-			}
-
-			return downloadedFile, nil
+		if filename != name { 
+			continue
 		}
+
+		//log.Printf("\n\n[DEBUG] Found file %#v in category %#v. ID: %#v, Status: %#v\n\n", filename, category, file.Id, file.Status)
+
+		downloadedFile, err := GetShuffleFileById(file.Id, shuffleConfig)
+		if err != nil {
+			log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", name, err)
+			return []byte{}, err
+		}
+
+		return downloadedFile, nil
 	}
 
 	return []byte{}, errors.New(fmt.Sprintf("Failed to find translation file matching name '%s' in category '%s'", name, category)) 

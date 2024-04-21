@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"crypto/md5"
 	"encoding/json"
+	"sync"
 
     "gopkg.in/yaml.v3"
 	openai "github.com/sashabaranov/go-openai"
@@ -357,7 +358,8 @@ func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleC
 	gptTranslated = FixTranslationStructure(gptTranslated)
 
 	if len(shuffleConfig.URL) > 0 {
-		return AddShuffleFile(inputStandard, "translation_output", []byte(gptTranslated), shuffleConfig)
+		go AddShuffleFile(inputStandard, "translation_output", []byte(gptTranslated), shuffleConfig)
+		return nil
 	}
 
 	// Write it to file in the example folder
@@ -639,27 +641,40 @@ func handleSubStandard(ctx context.Context, subStandard string, returnJson strin
 
 	// For each item in the list, translate it to the substandard
 	// Maybe do this with recursive Translate() calls?
+	var wg sync.WaitGroup
+	var mu sync.Mutex // Mutex to safely access parsedOutput slice
 	parsedOutput := [][]byte{}
 	for cnt, listItem := range listJson {
-		marshalledBody, err := json.Marshal(listItem)
-		if err != nil {
-			log.Printf("[ERROR] Schemaless: Error in marshalling of list item: %v", err)
-			continue
-		}
+		wg.Add(1) // Increment the wait group counter for each goroutine
 
-		// FIXME: Override the reference file after it has been successful for one?
-		schemalessOutput, err := Translate(ctx, subStandard, marshalledBody, authConfig, "skip_substandard")
-		if err != nil {
-			log.Printf("[ERROR] Schemaless: Error in schemaless.Translate for sub list item: %v", err)
-			continue
-		}
+		go func(cnt int, listItem interface{}) {
+			defer wg.Done() // Decrement the wait group counter when the goroutine completes
 
-		//log.Printf("\n\n[DEBUG] Got SUB translation output: %v\n\n", string(schemalessOutput))
-		parsedOutput = append(parsedOutput, schemalessOutput)
-		if cnt > 10 {
+			marshalledBody, err := json.Marshal(listItem)
+			if err != nil {
+				log.Printf("[ERROR] Schemaless: Error in marshalling of list item: %v", err)
+				return
+			}
+
+			// FIXME: Override the reference file after it has been successful for one?
+			schemalessOutput, err := Translate(ctx, subStandard, marshalledBody, authConfig, "skip_substandard")
+			if err != nil {
+				log.Printf("[ERROR] Schemaless: Error in schemaless.Translate for sub list item: %v", err)
+				return
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			parsedOutput = append(parsedOutput, schemalessOutput)
+		}(cnt, listItem)
+
+		if cnt > 50 {
+			log.Printf("[WARNING] Schemaless: Breaking after 10 items in the list")
 			break
 		}
 	}
+
+	wg.Wait() // Wait for all goroutines to finish
 
 	// Make the [][]byte into a []byte
 	finalOutput := []byte("[")
