@@ -1,0 +1,261 @@
+package schemaless 
+
+/*
+Runs a reverse search through JSON, to find the schemaless based on two inputs
+*/
+
+import (
+	"log"
+	"fmt"
+	"strings"
+	"reflect"
+	"encoding/json"
+)
+
+func FindMatchingString(stringToFind string, mapToSearch map[string]interface{}) string {
+	for key, value := range mapToSearch {
+		if _, ok := value.(string); !ok {
+			continue
+		} 
+
+		foundValue := value.(string)
+		if foundValue == stringToFind {
+			return key
+		}
+	}
+
+	return ""
+}
+
+// Recursive function to search for the schemaless in the map
+func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, error) {
+	newMap := make(map[string]string)
+	for key, _ := range searchInMap {
+		newMap[key] = ""
+	}
+
+	for key, value := range sourceMap {
+		if _, ok := value.(string); !ok {
+			// Check if it's a map and try to find the value in it
+			if val, ok := value.(map[string]interface{}); ok {
+				// Recursively search for the value in the map
+				output, err := ReverseTranslate(val, searchInMap)
+				if err != nil {
+					log.Printf("[ERROR] Recursion failed on key %s: %v", key, err)
+					continue
+				}
+
+				outputMap := make(map[string]string)
+				err = json.Unmarshal([]byte(output), &outputMap)
+				if err != nil {
+					log.Printf("[ERROR] Unmarshalling failed for outputmap: %v", err)
+					continue
+				}
+
+				for k, v := range outputMap {
+					if v == "" {
+						continue
+					}
+
+					newMap[k] = key + "." + v
+				}
+			} else if val, ok := value.([]interface{}); ok {
+				//log.Printf("List found: %#v", val)
+				// Check if it's a list and try to find the value in it
+				for i, v := range val {
+					if stringval, ok := v.(string); ok {
+						if stringval == "" {
+							continue
+						}
+
+		
+						matching := FindMatchingString(stringval, searchInMap)
+						if len(matching) == 0 {
+							//log.Printf("No matching found for %#v (2)", stringval)
+							continue
+						}
+
+						newMap[matching] = fmt.Sprintf("%s.#%d", key, i)
+
+
+					} else if mapval, ok := v.(map[string]interface{}); ok {
+						// Recursively search for the value in the map
+						output, err := ReverseTranslate(mapval, searchInMap)
+						if err != nil {
+							log.Printf("[ERROR] Recursion failed on key %s: %v", key, err)
+							continue
+						}
+
+						outputMap := make(map[string]string)
+						err = json.Unmarshal([]byte(output), &outputMap)
+						if err != nil {
+							log.Printf("[ERROR] Unmarshalling failed for outputmap: %v", err)
+							continue
+						}
+
+						for k, v := range outputMap {
+							if v == "" {
+								continue
+							}
+
+							newMap[k] = fmt.Sprintf("%s.#%d.%s", key, i, v)
+						}
+					} else {
+						log.Printf("No sublist handler for type %#v", reflect.TypeOf(v).String())
+					}
+
+					//newMap[matching] = key + ".#" + string(i)
+				}
+			} else {
+				log.Printf("No base handler for type %#v", reflect.TypeOf(value).String())
+			}
+
+			continue
+		}
+
+		matching := FindMatchingString(value.(string), searchInMap)
+		if len(matching) == 0 {
+			//log.Printf("No matching found for %#v", value)
+			continue
+		}
+
+		//log.Printf("[DEBUG] Matching for %#v: %s", value, matching)
+		//newMap[key] = matching
+		newMap[matching] = key
+	}
+
+	reversed, err := json.MarshalIndent(newMap, "", "	")
+	if err != nil {
+		log.Printf("[ERROR] Marshalling failed: %v", err)
+		return "", err
+	}
+
+	return string(reversed), nil
+}
+
+
+
+func removeWhitespace(input string) string {
+	// Remove all whitespace from the strings
+	return strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(input, " ", ""), "\n", ""), "\t", "")
+}
+	
+func compareOutput(reversed, expectedOutput string) bool {
+	// Remove all whitespace from the strings
+	reversed = removeWhitespace(reversed)
+	expectedOutput = removeWhitespace(expectedOutput)
+	if reversed == expectedOutput {
+		return true
+	}
+
+	// Try to map to map and compare
+	reversedMap := make(map[string]string)
+	err := json.Unmarshal([]byte(reversed), &reversedMap)
+	if err != nil {
+		log.Printf("[ERROR] Unmarshalling failed for reversed: %v", err)
+		return false
+	}
+
+	expectedMap := make(map[string]string)
+	err = json.Unmarshal([]byte(expectedOutput), &expectedMap)
+	if err != nil {
+		log.Printf("[ERROR] Unmarshalling failed for expected: %v", err)
+		return false
+	}
+
+	return reflect.DeepEqual(reversedMap, expectedMap)
+}
+
+func ReverseTranslateStrings(findKeys, findInData string) (string, error) {
+	var sourceMap map[string]interface{}
+	err := json.Unmarshal([]byte(findKeys), &sourceMap)
+	if err != nil {
+		log.Printf("[ERROR] Unmarshalling to map[string]interface{} failed for sourceData: %v", err)
+		return "", err
+	}
+
+	var searchInMap map[string]interface{}
+	err = json.Unmarshal([]byte(findInData), &searchInMap)
+	if err != nil {
+		log.Printf("[ERROR] Unmarshalling to map[string]interface{} failed for searchData: %v", err)
+		return "", err
+	}
+
+	return ReverseTranslate(sourceMap, searchInMap)
+
+}
+
+func runTest() {
+	// Sample input data
+	findKeys := `{
+		"findme": "This is the value to find",
+		"subkey": {
+			"findAnother": "This is another value to find",
+			"subsubkey": {
+				"findAnother2": "Amazing subsubkey to find"
+			},
+			"sublist": [
+				"This is a list",
+				"This is a list",
+				"Cool list item",
+				"This is a list"
+			],
+			"objectlist": [{
+				"key1": "This is a key"
+			},
+			{
+				"key1": "Another cool thing"
+			}]
+		}
+	}`
+
+	// Goal is to FIND the schemaless with key "findme" in the following data
+	findInData := `{
+		"key1": "This is the value to find",
+		"key2": "This is another value to find",
+		"key3": "Amazing subsubkey to find",
+		"key4": "Cool list item",
+		"key5": "Another cool thing"
+	}`
+
+	// Expected output
+	expectedOutput := `{
+		"key1": "findme",
+		"key2": "subkey.findAnother",
+		"key3": "subkey.subsubkey.findAnother2",
+		"key5": "subkey.objectlist.#1.key1",
+		"key4": "subkey.sublist.#2"
+	}`
+
+	reversed, err := ReverseTranslateStrings(findKeys, findInData)
+
+	/*
+	var sourceMap map[string]interface{}
+	err := json.Unmarshal([]byte(findKeys), &sourceMap)
+	if err != nil {
+		log.Printf("[ERROR] Unmarshalling failed: %v", err)
+		return 
+	}
+
+	var searchInMap map[string]interface{}
+	err = json.Unmarshal([]byte(findInData), &searchInMap)
+	if err != nil {
+		log.Printf("[ERROR] Unmarshalling failed: %v", err)
+		return 
+	}
+
+	reversed, err := ReverseTranslate(sourceMap, searchInMap)
+	*/
+
+	if err != nil {
+		log.Printf("[ERROR] Reversing failed: %v", err)
+		return 
+	}
+
+	sameKeyValues := compareOutput(reversed, expectedOutput)
+	if !sameKeyValues {
+		log.Printf("Failed")
+	} else {
+		log.Printf("Success")
+	}
+}

@@ -1,5 +1,8 @@
 package schemaless
-//package main 
+
+/*
+A package for translating from a JSON input to a standard format using OpenAI's GPT-4 API.
+*/
 
 import (
 	"fmt"
