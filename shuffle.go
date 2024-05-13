@@ -1,24 +1,25 @@
 package schemaless
 
 import (
+	"os"
+	"io"
+	"log"
+	"fmt"
+	"time"
+	"bytes"
+	"errors"
+	"context"
+	"strings"
+	"net/url"
+	"net/http"
+	"io/ioutil"
+	"math/rand"
 	"crypto/tls"
 	"crypto/md5"
 	"encoding/hex"
-	"bytes"
-	"errors"
-	"log"
-	"net/http"
-	"net/url"
-	"os"
-	"strings"
-	"time"
-	"fmt"
-	"io/ioutil"
 	"encoding/json"
 	"mime/multipart"
-	"io"
 
-	"context"
 	"github.com/patrickmn/go-cache"
 	"google.golang.org/appengine/memcache"
 	gomemcache "github.com/bradfitz/gomemcache/memcache"
@@ -134,7 +135,6 @@ type FileCreateResp struct {
 }
 
 func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleConfig) error { 
-	// func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte, error) {
 	if len(shuffleConfig.URL) < 1 {
 		return errors.New("Shuffle URL not set when adding file")
 	}
@@ -293,6 +293,10 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 	hasher.Write([]byte(fileUrl+shuffleConfig.Authorization+shuffleConfig.OrgId+shuffleConfig.ExecutionId))
 	cacheKey := hex.EncodeToString(hasher.Sum(nil))
 
+	// The file will be grabbed a ton, hence the cache actually speeding things up and reducing requests
+	sleepTime := time.Duration(25 + rand.Intn(1000-25)) * time.Millisecond
+	time.Sleep(sleepTime)
+
 	cache, err := GetCache(ctx, cacheKey)
 	if err == nil {
 		body = []byte(cache.([]uint8))
@@ -332,7 +336,7 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 		return []byte{}, err
 	}
 
-	go SetCache(ctx, cacheKey, body, 60)
+	go SetCache(ctx, cacheKey, body, 10)
 	if resp.StatusCode != 200 {
 		log.Printf("[ERROR] Schemaless: Bad status code (1) for %s: %s", fileUrl, resp.Status)
 		return []byte{}, errors.New(fmt.Sprintf("Bad status code when downloading file %s: %s", id, resp.Status))
@@ -360,6 +364,9 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 	hasher := md5.New()
 	hasher.Write([]byte(categoryUrl+shuffleConfig.Authorization+shuffleConfig.OrgId+shuffleConfig.ExecutionId))
 	cacheKey := hex.EncodeToString(hasher.Sum(nil))
+
+	sleepTime := time.Duration(25 + rand.Intn(1000-25)) * time.Millisecond
+	time.Sleep(sleepTime)
 
 	// Get the cache 
 	ctx := context.Background()

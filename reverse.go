@@ -1,4 +1,4 @@
-package schemaless 
+package schemaless
 
 /*
 Runs a reverse search through JSON, to find the schemaless based on two inputs
@@ -11,6 +11,38 @@ import (
 	"reflect"
 	"encoding/json"
 )
+
+// Recursive function to search for the location in the map and put the value there
+func MapValueToLocation(mapToSearch map[string]interface{}, location, value string) map[string]interface{} {
+
+	// Split the location into parts
+	log.Printf("Mapping value %s to location %s in body %#v", value, location, mapToSearch)
+	locationParts := strings.Split(location, ".")
+
+	// Iterate over the map and search for the location
+	for key, mapValue := range mapToSearch {
+		log.Printf("Key: %s, Value: %v", key, mapValue)
+		if key != locationParts[0] {
+			continue
+		}
+
+		if len(locationParts) == 1 {
+			// We've reached the end of the location, set the value
+			mapToSearch[key] = value
+		} else {
+			// Continue searching
+			newMap := make(map[string]interface{})
+			for k, v := range mapValue.(map[string]interface{}) {
+				newMap[k] = v
+			}
+
+			mapToSearch[key] = MapValueToLocation(newMap, strings.Join(locationParts[1:], "."), value)
+		}
+	}
+
+	return mapToSearch
+}
+
 
 func FindMatchingString(stringToFind string, mapToSearch map[string]interface{}) string {
 	for key, value := range mapToSearch {
@@ -35,8 +67,33 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 	}
 
 	for key, value := range sourceMap {
+		if val, ok := value.(string); ok {
+			val = strings.TrimSpace(val)
+			if strings.HasPrefix(val, "{") && strings.HasSuffix(val, "}") && strings.Contains(val, "\"") {
+
+				mapped := make(map[string]interface{})
+				_ = json.Unmarshal([]byte(val), &mapped)
+				//if err != nil {
+				//	log.Printf("[ERROR] Unmarshalling failed for JSON: %v", err)
+				//} else {
+				//	log.Printf("JSON found: %#v", mapped)
+				//}
+
+				value = mapped
+			}
+		}
+
 		if _, ok := value.(string); !ok {
 			// Check if it's a map and try to find the value in it
+			if val, ok := value.(map[string]string); ok {
+				newVal := make(map[string]interface{})
+				for k, v := range val {
+					newVal[k] = v
+				}
+
+				value = newVal
+			}
+
 			if val, ok := value.(map[string]interface{}); ok {
 				// Recursively search for the value in the map
 				output, err := ReverseTranslate(val, searchInMap)
@@ -101,13 +158,13 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 							newMap[k] = fmt.Sprintf("%s.#%d.%s", key, i, v)
 						}
 					} else {
-						log.Printf("No sublist handler for type %#v", reflect.TypeOf(v).String())
+						log.Printf("[ERROR] Schemaless reverse: No sublist handler for type %#v", reflect.TypeOf(v).String())
 					}
 
 					//newMap[matching] = key + ".#" + string(i)
 				}
 			} else {
-				log.Printf("No base handler for type %#v", reflect.TypeOf(value).String())
+				log.Printf("[ERROR] Schemaless reverse: No base handler for type %#v", reflect.TypeOf(value).String())
 			}
 
 			continue
@@ -185,6 +242,18 @@ func ReverseTranslateStrings(findKeys, findInData string) (string, error) {
 
 }
 
+func runSecondTest() {
+	findKeys := `{"proj":"SHUF","title":"heyo"}`
+	//findInData := `{"body":"{\n  \"fields\": {\n    \"project\": {\n      \"key\": \"SHUF\"\n    },\n    \"summary\": \"heyo\",\n    \"issuetype\": {\n      \"name\": \"Bug\"\n    }\n  }\n}\n","headers":"Content-Type=application/json\nAccept=application/json","password_basic":"","queries":"","ssl_verify":"","to_file":"","url":"https://shuffletest.atlassian.net","username_basic":""}`
+	findInData := `{"body":"{\n  \"fields\": {\n    \"project\": {\n      \"key\": \"SHUF\"\n    },\n    \"summary\": \"heyo\",\n    \"issuetype\": {\n      \"name\": \"Bug\"\n    }\n  }\n}\n","headers":"Content-Type=application/json\nAccept=application/json","password_basic":"","queries":"","ssl_verify":"","to_file":"","url":"https://shuffletest.atlassian.net","username_basic":""}`
+
+	reversed, err := ReverseTranslateStrings(findInData, findKeys)
+	log.Printf("Reversed: %s", reversed)
+	if err != nil {
+		log.Printf("[ERROR] Reversing failed: %v", err)
+	}
+}
+
 func runTest() {
 	// Sample input data
 	findKeys := `{
@@ -258,4 +327,33 @@ func runTest() {
 	} else {
 		log.Printf("Success")
 	}
+}
+
+func testMapToLocation() {
+	body := `{
+	  "fields": {
+		"project": {
+		  "key": ""
+		},
+		"summary": "",
+		"issuetype": {
+		  "name": "Bug"
+		}
+	  }
+	}`
+
+
+	mappedBody := make(map[string]interface{})
+	_ = json.Unmarshal([]byte(body), &mappedBody)
+
+	location := "fields.summary"
+	value := "heyo"
+	returnValue := MapValueToLocation(mappedBody, location, value)
+
+	location = "fields.project.key"
+	value = "SHUF"
+	returnValue = MapValueToLocation(mappedBody, location, value)
+
+	mappedBodyJSON, _ := json.MarshalIndent(returnValue, "", "  ")
+	log.Printf("Returned value: %s", string(mappedBodyJSON))
 }
