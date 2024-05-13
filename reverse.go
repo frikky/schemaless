@@ -16,12 +16,10 @@ import (
 func MapValueToLocation(mapToSearch map[string]interface{}, location, value string) map[string]interface{} {
 
 	// Split the location into parts
-	log.Printf("Mapping value %s to location %s in body %#v", value, location, mapToSearch)
 	locationParts := strings.Split(location, ".")
 
 	// Iterate over the map and search for the location
 	for key, mapValue := range mapToSearch {
-		log.Printf("Key: %s, Value: %v", key, mapValue)
 		if key != locationParts[0] {
 			continue
 		}
