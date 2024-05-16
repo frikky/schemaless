@@ -13,7 +13,7 @@ import (
 	"net/url"
 	"net/http"
 	"io/ioutil"
-	"math/rand"
+	//"math/rand"
 	"crypto/tls"
 	"crypto/md5"
 	"encoding/hex"
@@ -154,6 +154,19 @@ func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleCo
 		fileUrl += "&execution_id=" + shuffleConfig.ExecutionId
 	}
 
+	// Check if the file has already been uploaded based on shuffleConfig.OrgId+namespace+data. No point in overwriting with the same data.
+	hasher := md5.New()
+	ctx := context.Background()
+	hasher.Write([]byte(fmt.Sprintf("%s%s%s%s", shuffleConfig.OrgId, name, namespace, string(data))))
+	cacheKey := hex.EncodeToString(hasher.Sum(nil))
+	cache, err := GetCache(ctx, cacheKey)
+	if err == nil {
+		cacheData := []byte(cache.([]uint8))
+		if len(cacheData) > 0 { 
+			return nil
+		}
+	}
+	
 	fileDataJson, err := json.Marshal(fileData)
 	if err != nil {
 		return err
@@ -275,6 +288,12 @@ func AddShuffleFile(name, namespace string, data []byte, shuffleConfig ShuffleCo
 		return err
 	}
 
+	// Update with basically nothing, as the point isn't to get the file itself
+	err = SetCache(ctx, cacheKey, []byte("1"), 10)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless (8): Error setting cache for file %#v from Shuffle backend: %s", name, err)
+	}
+
 	return nil
 }
 
@@ -294,8 +313,6 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 	cacheKey := hex.EncodeToString(hasher.Sum(nil))
 
 	// The file will be grabbed a ton, hence the cache actually speeding things up and reducing requests
-	sleepTime := time.Duration(25 + rand.Intn(1000-25)) * time.Millisecond
-	time.Sleep(sleepTime)
 
 	cache, err := GetCache(ctx, cacheKey)
 	if err == nil {
@@ -352,7 +369,6 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 	}
 
 
-	log.Printf("[INFO] Schemaless: Finding file %#v in category %#v from Shuffle backend", name, category)
 
 	// 1. Get the category 
 	// 2. Find the file in the category output
@@ -365,17 +381,16 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 	hasher.Write([]byte(categoryUrl+shuffleConfig.Authorization+shuffleConfig.OrgId+shuffleConfig.ExecutionId))
 	cacheKey := hex.EncodeToString(hasher.Sum(nil))
 
-	sleepTime := time.Duration(25 + rand.Intn(1000-25)) * time.Millisecond
-	time.Sleep(sleepTime)
-
 	// Get the cache 
 	ctx := context.Background()
 	var body []byte
 	cache, err := GetCache(ctx, cacheKey)
 	if err == nil {
+		//log.Printf("[INFO] Schemaless: FOUND file %#v in category %#v from cache", name, category)
 		body = []byte(cache.([]uint8))
 		//return cacheData, nil
 	} else {
+		log.Printf("[INFO] Schemaless: Finding file %#v in category %#v from Shuffle backend", name, category)
 		if len(shuffleConfig.ExecutionId) > 0 {
 			categoryUrl += "&execution_id=" + shuffleConfig.ExecutionId
 		}

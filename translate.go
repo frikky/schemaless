@@ -28,6 +28,7 @@ var maxInputSize = 4000
 
 func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig) error {
 	if len(shuffleConfig.URL) > 0 {
+		//return nil
 		return AddShuffleFile(inputStandard, "translation_ai_queries", []byte(gptTranslated), shuffleConfig)
 	}
 
@@ -58,7 +59,6 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleC
 
 	systemMessage := fmt.Sprintf("Ensure the output is valid JSON, and does NOT add more keys to the standard. Make sure each key in the standard has a value from the user input. If values are nested, ALWAYS add the nested value in jq format such as 'secret.version.value'. Example: If the standard is ```{\"id\": \"The id of the ticket\", \"title\": \"The ticket title\"}```, and the user input is ```{\"key\": \"12345\", \"fields:\": {\"summary\": \"The title of the ticket\"}}```, the output should be ```{\"id\": \"key\", \"title\": \"fields.summary\"}```")
 
-	log.Printf("[DEBUG] Schemaless: Running GPT with system message: %s", systemMessage)
 
 	userQuery := fmt.Sprintf("Translate the given user input JSON structure to a standard format. Use the values from the standard to guide you what to look for. The standard format should follow the pattern:\n\n```json\n%s\n```\n\nUser Input:\n```json\n%s\n```\n\nGenerate the standard output structure without providing the expected output.", standardFormat, inputDataFormat)
 
@@ -69,6 +69,19 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleC
 	if len(inputDataFormat) > maxInputSize {
 		return standardFormat, errors.New(fmt.Sprintf("Input data too long. Max is %d. Current is %d", maxInputSize, len(inputDataFormat)))
 	}
+
+	// Make md5 of the query, and put it in cache to check
+	ctx := context.Background()
+	md5Query := fmt.Sprintf("%x", md5.Sum([]byte(shuffleConfig.OrgId+systemMessage+userQuery)))
+
+	cacheKey := fmt.Sprintf("translationquery-%s", md5Query)
+	cache, err := GetCache(ctx, cacheKey)
+	if err == nil {
+		contentOutput := string([]byte(cache.([]uint8)))
+		return contentOutput, nil
+	}
+
+	log.Printf("[DEBUG] Schemaless: Running GPT with system message: %s", systemMessage)
 
 	SaveQuery(keyTokenFile, userQuery, shuffleConfig)
 
@@ -109,6 +122,12 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleC
 
 		contentOutput = openaiResp2.Choices[0].Message.Content
 		break
+	}
+
+	err = SetCache(ctx, cacheKey, []byte(contentOutput), 30)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless: Error setting cache for key %s: %v", cacheKey, err)
+		return contentOutput, err
 	}
 
 	return contentOutput, nil
@@ -361,7 +380,8 @@ func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleC
 	gptTranslated = FixTranslationStructure(gptTranslated)
 
 	if len(shuffleConfig.URL) > 0 {
-		go AddShuffleFile(inputStandard, "translation_output", []byte(gptTranslated), shuffleConfig)
+		// Used to be a goroutine
+		return AddShuffleFile(inputStandard, "translation_output", []byte(gptTranslated), shuffleConfig)
 		return nil
 	}
 
@@ -387,6 +407,8 @@ func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleC
 
 func SaveParsedInput(inputStandard string, gptTranslated []byte, shuffleConfig ShuffleConfig) error {
 	if len(shuffleConfig.URL) > 0 {
+		// FIXME: Should we upload everything? I think not
+		return nil
 		return AddShuffleFile(inputStandard, "translation_input", gptTranslated, shuffleConfig)
 	}
 
@@ -644,12 +666,33 @@ func handleSubStandard(ctx context.Context, subStandard string, returnJson strin
 
 	// For each item in the list, translate it to the substandard
 	// Maybe do this with recursive Translate() calls?
+
+	skipAfterCount := 50 
 	var wg sync.WaitGroup
 	var mu sync.Mutex // Mutex to safely access parsedOutput slice
+
 	parsedOutput := [][]byte{}
 	for cnt, listItem := range listJson {
-		wg.Add(1) // Increment the wait group counter for each goroutine
+		// No goroutine on the first ones as we want to make sure caching is done properly
+		if cnt == 0 {
+			marshalledBody, err := json.Marshal(listItem)
+			if err != nil {
+				log.Printf("[ERROR] Schemaless: Error in marshalling of list item: %v", err)
+				continue
+			}
 
+			schemalessOutput, err := Translate(ctx, subStandard, marshalledBody, authConfig, "skip_substandard")
+			if err != nil {
+				log.Printf("[ERROR] Schemaless: Error in schemaless.Translate for sub list item: %v", err)
+				continue
+			}
+
+			parsedOutput = append(parsedOutput, schemalessOutput)
+			continue
+		}
+
+
+		wg.Add(1) // Increment the wait group counter for each goroutine
 		go func(cnt int, listItem interface{}) {
 			defer wg.Done() // Decrement the wait group counter when the goroutine completes
 
@@ -671,8 +714,8 @@ func handleSubStandard(ctx context.Context, subStandard string, returnJson strin
 			parsedOutput = append(parsedOutput, schemalessOutput)
 		}(cnt, listItem)
 
-		if cnt > 50 {
-			log.Printf("[WARNING] Schemaless: Breaking after 10 items in the list")
+		if cnt > skipAfterCount {
+			log.Printf("[WARNING] Schemaless: Breaking after %d items in the list", skipAfterCount)
 			break
 		}
 	}
@@ -830,9 +873,9 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		if err != nil {
 			log.Printf("[ERROR] Error in SaveTranslation (3): %v", err)
 			return []byte{}, err
-		}
+		} 
 
-		log.Printf("[DEBUG] Saved translation to file. Should now run OpenAI and set cache!")
+		//log.Printf("[DEBUG] Saved GPT translation to file. Should now run OpenAI and set cache!")
 		inputStructure = []byte(gptTranslated)
 	}
 
