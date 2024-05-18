@@ -15,7 +15,11 @@ go get github.com/frikky/schemaless
 ```
 
 ```
-output := schemaless.Translate(ctx context.Context, standard string, userinput string) 
+// Translate random string -> JSON paths
+output := schemaless.Translate(ctx context.Context, standard string, userinput string)
+
+// Translate outputted data -> standard location
+output, err := ReverseTranslate(sourceMap, searchInMap) 
 ```
 
 ## Test it
