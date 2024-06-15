@@ -15,7 +15,11 @@ go get github.com/frikky/schemaless
 ```
 
 ```
-output := schemaless.Translate(ctx context.Context, standard string, userinput string) 
+// Translate random string -> JSON paths
+output := schemaless.Translate(ctx context.Context, standard string, userinput string)
+
+// Translate outputted data -> standard location
+output, err := ReverseTranslate(sourceMap, searchInMap) 
 ```
 
 ## Test it
@@ -63,3 +67,54 @@ This is an example that finds matching nested values based on the User Input and
 }
 ```
 
+
+## Reverse Example
+There are however cases where you have done translation from input data to output data, but don't have a reference of how the translation between them happened. In this case, we built a reverse translation search which also outputs the path in the same way. This e.g. allows us to NOT keep using AI translation after it's been done once, and instead override the translation itself with just a JSON reference.
+
+**Outputted data:**
+```
+{
+	"findme": "This is the value to find",
+	"subkey": {
+		"findAnother": "This is another value to find",
+		"subsubkey": {
+			"findAnother2": "Amazing subsubkey to find"
+		},
+		"sublist": [
+			"This is a list",
+			"This is a list",
+			"Cool list item",
+			"This is a list"
+		],
+		"objectlist": [{
+			"key1": "This is a key"
+		},
+		{
+			"key1": "Another cool thing"
+		}]
+	}
+}`
+```
+
+**The standard with the data locations to find:**
+```
+{
+	"key1": "This is the value to find",
+	"key2": "This is another value to find",
+	"key3": "Amazing subsubkey to find",
+	"key4": "Cool list item",
+	"key5": "Another cool thing"
+}
+```
+
+
+**Expected Output**:
+```
+{
+	"key1": "findme",
+	"key2": "subkey.findAnother",
+	"key3": "subkey.subsubkey.findAnother2",
+	"key5": "subkey.objectlist.#1.key1",
+	"key4": "subkey.sublist.#2"
+}
+```
