@@ -54,11 +54,11 @@ func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig)
 
 func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleConfig ShuffleConfig) (string, error) {
 
-	//systemMessage := fmt.Sprintf("Use the this standard format for the output, and neither add things at the start, nor subtract from the end. Only modify the keys. Add ONLY the most relevant matching key, and make sure each key has a value. It NEEDS to be a valid JSON message: %s", standardFormat)
-	//userQuery := fmt.Sprintf(`Use the standard to translate the following input JSON data. If the key is a synonym, matching or similar between the two, add the key of the input to the value of the standard. User Input:\n%s`, inputDataFormat)
+	//inputToken := "apikey"
+	//additionalCondition := fmt.Sprintf("If the key '%s' matches exactly to a field, add '%s' itself instead of any jq format. ", inputToken, inputToken)
+	additionalCondition := fmt.Sprintf("")
 
-	systemMessage := fmt.Sprintf("Ensure the output is valid JSON, and does NOT add more keys to the standard. Make sure each key in the standard has a value from the user input. If values are nested, ALWAYS add the nested value in jq format such as 'secret.version.value'. Example: If the standard is ```{\"id\": \"The id of the ticket\", \"title\": \"The ticket title\"}```, and the user input is ```{\"key\": \"12345\", \"fields:\": {\"summary\": \"The title of the ticket\"}}```, the output should be ```{\"id\": \"key\", \"title\": \"fields.summary\"}```")
-
+	systemMessage := fmt.Sprintf("Ensure the output is valid JSON, and does NOT add more keys to the standard. Make sure each key in the standard has a value from the user input. If values are nested, ALWAYS add the nested value in jq format such as 'secret.version.value'. %sExample: If the standard is ```{\"id\": \"The id of the ticket\", \"title\": \"The ticket title\"}```, and the user input is ```{\"key\": \"12345\", \"fields:\": {\"summary\": \"The title of the ticket\"}}```, the output should be ```{\"id\": \"key\", \"title\": \"fields.summary\"}```", additionalCondition)
 
 	userQuery := fmt.Sprintf("Translate the given user input JSON structure to a standard format. Use the values from the standard to guide you what to look for. The standard format should follow the pattern:\n\n```json\n%s\n```\n\nUser Input:\n```json\n%s\n```\n\nGenerate the standard output structure without providing the expected output.", standardFormat, inputDataFormat)
 
@@ -762,6 +762,27 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		}
 	}
 
+	// FIXME: May not be important anymore 
+	// This prevents recursion inside a JSON blob
+	// in case file reference is bad
+
+	// Reference key addition is a way the user can send in a key to add to the filename, as to make it unique and configurable, even with the same input/output from the actual translation
+	skipSubstandard := false
+	filenamePrefix := ""
+	for _, input := range inputConfig { 
+		if input == "skip_substandard" {
+			skipSubstandard = true
+			break
+		}
+
+		if strings.HasPrefix(strings.ToLower(input), "filename_prefix:") {
+			input = strings.TrimPrefix(input, "filename_prefix:")
+			if len(input) > 0 {
+				filenamePrefix = fmt.Sprintf("%s", input)
+			}
+		}
+	}
+
 	if shuffleConfig.URL == "" {
 		// Check for paths
 		fixPaths()
@@ -789,29 +810,23 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		inputStandard = strings.TrimSuffix(inputStandard, ".json")
 	}
 
-	//keyToken = fmt.Sprintf("%s:%s", inputStandard, keyToken)
-	keyTokenFile := fmt.Sprintf("%s-%x", inputStandard, md5.Sum([]byte(keyToken)))
+	keyTokenFile := fmt.Sprintf("%s%s-%x", filenamePrefix, inputStandard, md5.Sum([]byte(keyToken)))
 	err = SaveParsedInput(keyTokenFile, returnJson, shuffleConfig)
 	if err != nil {
 		log.Printf("[ERROR] Schemaless: Error in SaveParsedInput for file %s: '%v'", keyTokenFile, err)
 		return []byte{}, err
 	}
 
-	// FIXME: May not be important anymore 
-	// This prevents recursion inside a JSON blob
-	// in case file reference is bad
-	skipSubstandard := false
-	for _, input := range inputConfig { 
-		if input == "skip_substandard" {
-			skipSubstandard = true
-			break
-		}
-	}
-
 	// Check if the keyToken is already in cache and use that translation layer
 	//log.Printf("\n\n[DEBUG] Schemaless: Getting existing structure for keyToken: '%s'\n\n", keyTokenFile)
 	inputStructure, err := GetExistingStructure(keyTokenFile, shuffleConfig)
+
+
+	log.Printf("[DEBUG] Schemaless: Found existing structure: %v", string(inputStructure))
 	fixedOutput := FixTranslationStructure(string(inputStructure))
+
+	log.Printf("[DEBUG] Schemaless: Fixed output: %v", fixedOutput)
+
 	inputStructure = []byte(fixedOutput)
 
 	if err == nil {

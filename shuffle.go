@@ -467,6 +467,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 			log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", name, err)
 			return []byte{}, err
 		}
+		//log.Printf("\n\n[DEBUG] Got downloaded file data:\n%s\n\n", downloadedFile)
 
 		return downloadedFile, nil
 	}
