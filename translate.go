@@ -822,10 +822,10 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 	inputStructure, err := GetExistingStructure(keyTokenFile, shuffleConfig)
 
 
-	log.Printf("[DEBUG] Schemaless: Found existing structure: %v", string(inputStructure))
+	//log.Printf("[DEBUG] Schemaless: Found existing structure: %v", string(inputStructure))
 	fixedOutput := FixTranslationStructure(string(inputStructure))
 
-	log.Printf("[DEBUG] Schemaless: Fixed output: %v", fixedOutput)
+	//log.Printf("[DEBUG] Schemaless: Fixed output: %v", fixedOutput)
 
 	inputStructure = []byte(fixedOutput)
 
