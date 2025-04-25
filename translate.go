@@ -659,7 +659,8 @@ func handleSubStandard(ctx context.Context, subStandard string, returnJson strin
 	}
 
 	if len(listJson) == 0 {
-		return []byte{}, errors.New("No list key found in the sub body (1 LEVEL ONLY). No parsing to be done")
+		log.Printf("[DEBUG] Schemaless: No list key found in the sub body (1 LEVEL ONLY). No parsing to be done - returning empty list")
+		return []byte(`[]`), nil
 	}
 
 	log.Printf("[DEBUG] Schemaless: Found a list of length %d in the returnJson. Should translate each item to the substandard", len(listJson))
