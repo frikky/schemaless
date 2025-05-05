@@ -30,8 +30,22 @@ func MapValueToLocation(mapToSearch map[string]interface{}, location, value stri
 		} else {
 			// Continue searching
 			newMap := make(map[string]interface{})
-			for k, v := range mapValue.(map[string]interface{}) {
-				newMap[k] = v
+			if val, ok := mapValue.(map[string]interface{}); ok {
+				for k, v := range val {
+					newMap[k] = v
+				}
+			} else if val, ok := mapValue.([]interface{}); ok {
+				log.Printf("[ERROR] Schemaless handling []interface{} with arbitary values. This MAY not work. MapValue: %#v", mapValue)
+				for i, v := range val {
+					if mapValue, ok := v.(map[string]interface{}); ok {
+						newMap[fmt.Sprintf("#%d", i)] = mapValue
+					} else {
+						newMap[fmt.Sprintf("#%d", i)] = v
+					}
+				}
+			} else {
+				log.Printf("[ERROR] Schemaless handling unknown type %#v. Value: %#v", reflect.TypeOf(mapValue).String(), value)
+				continue
 			}
 
 			mapToSearch[key] = MapValueToLocation(newMap, strings.Join(locationParts[1:], "."), value)

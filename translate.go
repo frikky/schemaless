@@ -814,33 +814,25 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 	keyTokenFile := fmt.Sprintf("%s%s-%x", filenamePrefix, inputStandard, md5.Sum([]byte(keyToken)))
 	err = SaveParsedInput(keyTokenFile, returnJson, shuffleConfig)
 	if err != nil {
-		log.Printf("[ERROR] Schemaless: Error in SaveParsedInput for file %s: '%v'", keyTokenFile, err)
-		return []byte{}, err
+		log.Printf("[WARNING] Schemaless: Error in SaveParsedInput for file %s: '%v'", keyTokenFile, err)
+		return inputValue, nil
 	}
 
 	// Check if the keyToken is already in cache and use that translation layer
 	//log.Printf("\n\n[DEBUG] Schemaless: Getting existing structure for keyToken: '%s'\n\n", keyTokenFile)
 	inputStructure, err := GetExistingStructure(keyTokenFile, shuffleConfig)
 
-
-	//log.Printf("[DEBUG] Schemaless: Found existing structure: %v", string(inputStructure))
 	fixedOutput := FixTranslationStructure(string(inputStructure))
-
-	//log.Printf("[DEBUG] Schemaless: Fixed output: %v", fixedOutput)
-
 	inputStructure = []byte(fixedOutput)
-
 	if err == nil {
 		//log.Printf("\n\n[DEBUG] Schemaless: Found existing structure for keyToken: '%s': %#v\n\n", keyTokenFile, string(inputStructure))
 	} else {
 		// Check if the standard exists at all
 		standardFormat, err := GetStandard(inputStandard, shuffleConfig)
 		if err != nil {
-			log.Printf("[ERROR] Schemaless: Error in GetStandard for standard %#v: %v", inputStandard, err)
-			return []byte{}, err
+			log.Printf("[WARNING] Schemaless: Problem in GetStandard for standard %#v: %v", inputStandard, err)
+			return inputValue, nil
 		}
-
-		//log.Printf("\n\nFOUND STANDARD (%s): %v\n\n", inputStandard, string(standardFormat))
 
 		trimmedStandard := strings.TrimSpace(string(standardFormat))
 		if !skipSubstandard && len(trimmedStandard) > 2 && strings.Contains(trimmedStandard, ".json") && strings.HasPrefix(trimmedStandard, "[") && strings.HasSuffix(trimmedStandard, "]") {
