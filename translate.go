@@ -23,8 +23,35 @@ import (
 	"context"
 )
 
-var chosenModel = "gpt-4-turbo-preview"
+//var chosenModel = "gpt-4-turbo-preview"
+var chosenModel = "o4-mini"
 var maxInputSize = 4000
+
+func getRootFolder() string { 
+	rootFolder := ""
+	filepath := os.Getenv("FILE_LOCATION")
+	if len(filepath) > 0 {
+		rootFolder = filepath
+	} 
+
+	if len(rootFolder) == 0 {
+		filepath = os.Getenv("SHUFFLE_FILE_LOCATION") 
+		if len(filepath) > 0 {
+			rootFolder = filepath
+		}
+	}
+
+	if len(rootFolder) > 0 {
+		if !strings.HasSuffix(rootFolder, "/") {
+			rootFolder += "/"
+		}
+
+		rootFolder += "schemaless/"
+	}
+
+	return rootFolder
+}
+
 
 func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig) error {
 	if len(shuffleConfig.URL) > 0 {
@@ -33,7 +60,7 @@ func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig)
 	}
 
 	// Write it to file in the example folder
-	filename := fmt.Sprintf("queries/%s", inputStandard)
+	filename := fmt.Sprintf("%squeries/%s", getRootFolder(), inputStandard)
 
 	// Open the file
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -386,7 +413,7 @@ func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleC
 	}
 
 	// Write it to file in the example folder
-	filename := fmt.Sprintf("examples/%s.json", inputStandard)
+	filename := fmt.Sprintf("%sexamples/%s.json", getRootFolder(), inputStandard)
 
 	// Open the file
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -413,7 +440,7 @@ func SaveParsedInput(inputStandard string, gptTranslated []byte, shuffleConfig S
 	}
 
 	// Write it to file in the example folder
-	filename := fmt.Sprintf("input/%s", inputStandard)
+	filename := fmt.Sprintf("%sinput/%s", getRootFolder(), inputStandard)
 
 	// Open the file
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -446,7 +473,7 @@ func GetStandard(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, err
 	}
 
 	// Open the relevant file
-	filename := fmt.Sprintf("standards/%s.json", inputStandard)
+	filename := fmt.Sprintf("%sstandards/%s.json", getRootFolder(), inputStandard)
 	jsonFile, err := os.Open(filename)
 	if err != nil {
 		//log.Printf("[ERROR] Schemaless: Error opening file %s (4): %v", filename, err)
@@ -470,7 +497,7 @@ func GetExistingStructure(inputStandard string, shuffleConfig ShuffleConfig) ([]
 	}
 
 	// Open the relevant file
-	filename := fmt.Sprintf("examples/%s.json", inputStandard)
+	filename := fmt.Sprintf("%sexamples/%s.json", getRootFolder(), inputStandard)
 	jsonFile, err := os.Open(filename)
 	if err != nil {
 		//log.Printf("[ERROR] Schemaless: Error opening file %s (5): %v", filename, err)
@@ -619,7 +646,12 @@ func fixPaths() {
 	for _, folder := range folders {
 		if _, err := os.Stat(folder); os.IsNotExist(err) {
 			log.Printf("[DEBUG] Schemaless: Folder '%s' does not exist, creating it", folder)
-			os.Mkdir(folder, 0755)
+
+			folderpath := fmt.Sprintf("%s%s", getRootFolder(), folder)
+			err = os.Mkdir(folderpath, 0755)
+			if err != nil {
+				log.Printf("[ERROR] Schemaless: Error creating folder '%s': %v", folder, err)
+			}
 		}
 	}
 
