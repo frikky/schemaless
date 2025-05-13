@@ -648,7 +648,7 @@ func fixPaths() {
 			log.Printf("[DEBUG] Schemaless: Folder '%s' does not exist, creating it", folder)
 
 			folderpath := fmt.Sprintf("%s%s", getRootFolder(), folder)
-			err = os.Mkdir(folderpath, 0755)
+			err = os.MkdirAll(folderpath, 0755)
 			if err != nil {
 				log.Printf("[ERROR] Schemaless: Error creating folder '%s': %v", folder, err)
 			}
