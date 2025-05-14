@@ -69,7 +69,6 @@ func GetExternalClient(baseUrl string) *http.Client {
 
 	skipSSLVerify := false
 	if strings.ToLower(os.Getenv("SHUFFLE_OPENSEARCH_SKIPSSL_VERIFY")) == "true" || strings.ToLower(os.Getenv("SHUFFLE_SKIPSSL_VERIFY")) == "true" { 
-		//log.Printf("[DEBUG] SKIPPING SSL verification with Opensearch")
 		skipSSLVerify = true
 
 		os.Setenv("SHUFFLE_OPENSEARCH_SKIPSSL_VERIFY", "true")
@@ -324,7 +323,6 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 		fileUrl += "?execution_id=" + shuffleConfig.ExecutionId
 	}
 
-	//log.Printf("[DEBUG] Getting file from: %s", fileUrl)
 	req, err := http.NewRequest(
 		"GET", 
 		fileUrl,
@@ -395,7 +393,9 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 			categoryUrl += "&execution_id=" + shuffleConfig.ExecutionId
 		}
 
-		log.Printf("[DEBUG] Getting category WITHOUT cache: %s", categoryUrl)
+		if debug { 
+			log.Printf("[DEBUG] Getting category WITHOUT cache from '%s'", categoryUrl)
+		}
 		req, err := http.NewRequest(
 			"GET", 
 			categoryUrl,
@@ -460,14 +460,11 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 			continue
 		}
 
-		//log.Printf("\n\n[DEBUG] Found file %#v in category %#v. ID: %#v, Status: %#v\n\n", filename, category, file.Id, file.Status)
-
 		downloadedFile, err := GetShuffleFileById(file.Id, shuffleConfig)
 		if err != nil {
 			log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", name, err)
 			return []byte{}, err
 		}
-		//log.Printf("\n\n[DEBUG] Got downloaded file data:\n%s\n\n", downloadedFile)
 
 		return downloadedFile, nil
 	}
@@ -711,4 +708,3 @@ func SetCache(ctx context.Context, name string, data []byte, expiration int32) e
 
 	return nil
 }
-

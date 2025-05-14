@@ -18,7 +18,9 @@ import (
 	"sync"
 
     "gopkg.in/yaml.v3"
+	"encoding/base64"
 	openai "github.com/sashabaranov/go-openai"
+	"github.com/google/go-github/v28/github"
 
 	"context"
 )
@@ -26,6 +28,7 @@ import (
 //var chosenModel = "gpt-4-turbo-preview"
 var chosenModel = "o4-mini"
 var maxInputSize = 4000
+var debug = false
 
 func getRootFolder() string { 
 	rootFolder := ""
@@ -63,7 +66,7 @@ func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig)
 	filename := fmt.Sprintf("%squeries/%s", getRootFolder(), inputStandard)
 
 	// Open the file
-	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(filename, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		//log.Printf("[ERROR] Error opening file %s (1): %v", filename, err)
 		return err
@@ -108,7 +111,9 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleC
 		return contentOutput, nil
 	}
 
-	log.Printf("[DEBUG] Schemaless: Running GPT with system message: %s", systemMessage)
+	if debug { 
+		log.Printf("[DEBUG] Schemaless: Running GPT with system message: %s", systemMessage)
+	}
 
 	SaveQuery(keyTokenFile, userQuery, shuffleConfig)
 
@@ -136,7 +141,6 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleC
 						Content: userQuery,
 					},
 				},
-				Temperature: 0,
 			},
 		)
 
@@ -167,16 +171,13 @@ func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[strin
 	returnStructure := map[string]interface{}{}
 	returnCache, err := GetCache(ctx, inputKeyTokenMd5)
 	if err != nil {
-		log.Printf("[ERROR] Schemaless: Error getting cache: %v", err)
+		log.Printf("[ERROR] Schemaless: Error getting cache key %s: %v", inputKeyTokenMd5, err)
 		return returnStructure, err
 	}
 
-
 	// Setting the structure AGAIN to make it not time out
-	//cache, err := GetCache(ctx, cacheKey)
 	cacheData := []byte(returnCache.([]uint8))
 	fixedCache := FixTranslationStructure(string(cacheData)) 
-
 	err = json.Unmarshal([]byte(fixedCache), &returnStructure)
 	if err != nil {
 		log.Printf("[ERROR] Schemaless: Failed to unmarshal from cache key %s: %s. Value: %s", inputKeyTokenMd5, err, cacheData)
@@ -413,10 +414,10 @@ func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleC
 	}
 
 	// Write it to file in the example folder
-	filename := fmt.Sprintf("%sexamples/%s.json", getRootFolder(), inputStandard)
+	filename := fmt.Sprintf("%stranslation_output/%s.json", getRootFolder(), inputStandard)
 
 	// Open the file
-	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(filename, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		//log.Printf("[ERROR] Error opening file %s (2): %v", filename, err)
 		return err
@@ -443,7 +444,7 @@ func SaveParsedInput(inputStandard string, gptTranslated []byte, shuffleConfig S
 	filename := fmt.Sprintf("%sinput/%s", getRootFolder(), inputStandard)
 
 	// Open the file
-	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(filename, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		//log.Printf("[ERROR] Schemaless: Error opening file %s (3): %v", filename, err)
 		return err
@@ -459,6 +460,108 @@ func SaveParsedInput(inputStandard string, gptTranslated []byte, shuffleConfig S
 	return nil
 }
 
+func LoadStandardFromGithub(client github.Client, owner, repo, path, filename string) ([]*github.RepositoryContent, error) {
+	var err error
+
+	ctx := context.Background()
+	files := []*github.RepositoryContent{}
+
+	cacheKey := fmt.Sprintf("github_%s_%s_%s_%s", owner, repo, path, filename)
+	cache, err := GetCache(ctx, cacheKey)
+	if err == nil {
+		cacheData := []byte(cache.([]uint8))
+		err = json.Unmarshal(cacheData, &files)
+		if err == nil && len(files) > 0 {
+			return files, nil
+		}
+	}
+
+	if len(files) == 0 {
+		_, files, _, err = client.Repositories.GetContents(ctx, owner, repo, path, nil)
+		if err != nil {
+			log.Printf("[WARNING] Failed getting standard list for namespace %s: %s", path, err)
+			return []*github.RepositoryContent{}, err
+		}
+	}
+
+	//log.Printf("\n\n[DEBUG] Got %d file(s): %s\n\n", len(files), path)
+	if len(files) == 0 {
+		log.Printf("[ERROR] No files found in namespace '%s' on Github - Used for integration framework", path)
+		return []*github.RepositoryContent{}, nil
+	}
+
+	matchingFiles := []*github.RepositoryContent{}
+	searchname := strings.ToLower(strings.ReplaceAll(filename, " ", "_"))
+	for _, item := range files {
+		itemName := strings.ToLower(strings.ReplaceAll(*item.Name, " ", "_"))
+		if len(itemName) > 0 && strings.HasPrefix(itemName, searchname) {
+			matchingFiles = append(matchingFiles, item)
+		}
+	}
+
+	files = matchingFiles
+	data, err := json.Marshal(files)
+	if err != nil {
+		log.Printf("[WARNING] Failed marshalling in get github files: %s", err)
+		return files, nil
+	}
+
+	err = SetCache(ctx, cacheKey, data, 30)
+	if err != nil {
+		log.Printf("[WARNING] Failed setting cache for getfiles on github '%s': %s", cacheKey, err)
+	}
+  
+	return files, nil
+}
+
+func LoadAndSaveStandard(inputStandard string) (error) {
+	client := github.NewClient(nil)
+	owner := "shuffle"
+	repo := "standards"
+	path := "translation_standards"
+	foundFiles, err := LoadStandardFromGithub(*client, owner, repo, path, inputStandard)
+
+	if debug { 
+		log.Printf("[DEBUG] Found %d files in Github for standard '%s'", len(foundFiles), inputStandard)
+	}
+
+	if err != nil {
+		log.Printf("[ERROR] Failed getting standard list from Github: %s", err)
+		return err
+	}
+
+	ctx := context.Background()
+	for _, item := range foundFiles {
+		if debug { 
+			log.Printf("[DEBUG] Found file from Github '%s'", *item.Name)
+		}
+
+		fileContent, _, _, err := client.Repositories.GetContents(ctx, owner, repo, *item.Path, nil)
+		if err != nil {
+			log.Printf("[ERROR] Failed getting file %s: %s", *item.Path, err)
+			continue
+		}
+
+		// Get the bytes of the file
+		decoded, err := base64.StdEncoding.DecodeString(*fileContent.Content)
+		if err != nil {
+			log.Printf("[ERROR] Failed decoding standard file %s: %s", *item.Path, err)
+			continue
+		}
+
+		// Save the file to the local filesystem
+		filename := fmt.Sprintf("%sstandards/%s", getRootFolder(), *item.Name)
+		err = ioutil.WriteFile(filename, decoded, 0644)
+		if err != nil {
+			log.Printf("[ERROR] Failed writing standard file %s: %s", filename, err)
+			continue
+		}
+
+		log.Printf("[INFO] Schemaless: Saved standard file %s to %s", *item.Name, filename)
+	}
+
+	return nil
+}
 
 func GetStandard(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, error) {
 
@@ -473,17 +576,31 @@ func GetStandard(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, err
 	}
 
 	// Open the relevant file
-	filename := fmt.Sprintf("%sstandards/%s.json", getRootFolder(), inputStandard)
-	jsonFile, err := os.Open(filename)
+	filepath := fmt.Sprintf("%sstandards/%s.json", getRootFolder(), inputStandard)
+	jsonFile, err := os.Open(filepath)
 	if err != nil {
-		//log.Printf("[ERROR] Schemaless: Error opening file %s (4): %v", filename, err)
-		return []byte{}, err
+		log.Printf("[INFO] Schemaless: Problem finding file %s (4): %v. Loading the standard from Github and saving.", filepath, err)
+
+		err := LoadAndSaveStandard(inputStandard)
+		if err != nil {
+			log.Printf("[ERROR] Failed to load standard from Github: %s", err)
+			return []byte{}, err
+		}
+
+		log.Printf("[INFO] Done loading standard '%s' from Shuffle's Github standards", inputStandard)
+
+		// Re-instantiate referece to the file 
+		jsonFile, err = os.Open(filepath)
+		if err != nil {
+			log.Printf("[ERROR] Schemaless: Error re-opening file %s (5): %v", filepath, err)
+			return []byte{}, err
+		}
 	}
 
 	// Read the file into a byte array
 	byteValue, err  := ioutil.ReadAll(jsonFile)
 	if err != nil {
-		log.Printf("[ERROR] Schemaless: Error reading file %s: %v", filename, err)
+		log.Printf("[ERROR] Schemaless: Error reading file %s: %v", filepath, err)
 		return []byte{}, err
 	}
 
@@ -496,8 +613,12 @@ func GetExistingStructure(inputStandard string, shuffleConfig ShuffleConfig) ([]
 		return FindShuffleFile(inputStandard, "translation_output", shuffleConfig)
 	}
 
+	// FIXME: Should we skip this? 
+	// Is there any reason to load the standard from the file system?
+	//return []byte{}, nil
+
 	// Open the relevant file
-	filename := fmt.Sprintf("%sexamples/%s.json", getRootFolder(), inputStandard)
+	filename := fmt.Sprintf("%stranslation_output/%s.json", getRootFolder(), inputStandard)
 	jsonFile, err := os.Open(filename)
 	if err != nil {
 		//log.Printf("[ERROR] Schemaless: Error opening file %s (5): %v", filename, err)
@@ -640,22 +761,22 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 	return translatedOutput, modifiedOutput, nil
 }
 
+// Ensures relevant folders exist
 func fixPaths() {
-	// Check if folders "examples" and "standards" exists"
-	folders := []string{"examples", "standards", "input", "queries"}
+	folders := []string{"translation_output", "standards", "input", "queries"}
 	for _, folder := range folders {
-		if _, err := os.Stat(folder); os.IsNotExist(err) {
-			log.Printf("[DEBUG] Schemaless: Folder '%s' does not exist, creating it", folder)
+		folderpath := fmt.Sprintf("%s%s", getRootFolder(), folder)
+		if _, err := os.Stat(folderpath); os.IsNotExist(err) {
+			if debug { 
+				log.Printf("[DEBUG] Schemaless: Folder '%s' does not exist, creating it", folder)
+			}
 
-			folderpath := fmt.Sprintf("%s%s", getRootFolder(), folder)
 			err = os.MkdirAll(folderpath, 0755)
 			if err != nil {
 				log.Printf("[ERROR] Schemaless: Error creating folder '%s': %v", folder, err)
 			}
 		}
 	}
-
-	//log.Printf("[DEBUG] Schemaless: Folders fixed. The 'Standards' folder has the standards used for translation with GPT. 'Examples' folder contains info about already translated standards.")
 }
 
 func handleSubStandard(ctx context.Context, subStandard string, returnJson string, authConfig string) ([]byte, error) {
@@ -899,9 +1020,8 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		if err != nil {
 			log.Printf("[ERROR] Schemaless: Error in GptTranslate: %v", err)
 
-			// FIXME: Should make the file anyway, as to make it manually editable
 			if strings.Contains(fmt.Sprintf("%s", err), "OPENAI") {
-				log.Printf("[DEBUG] Saving standard even though no OPENAI key is supplied")
+				log.Printf("[DEBUG] Schemaless: Saving standard even though no OPENAI key is supplied")
 				SaveTranslation(keyTokenFile, gptTranslated, shuffleConfig)
 			}
 
@@ -911,7 +1031,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		//log.Printf("\n\n[DEBUG] GPT translated: %v. Should save this to file in folder 'examples' with filename %s\n\n", string(gptTranslated), keyTokenFile)
 		err = SaveTranslation(keyTokenFile, gptTranslated, shuffleConfig)
 		if err != nil {
-			log.Printf("[ERROR] Error in SaveTranslation (3): %v", err)
+			log.Printf("[ERROR] Schemaless: Problem in SaveTranslation (3): %v", err)
 			return []byte{}, err
 		} 
 
@@ -919,16 +1039,17 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		inputStructure = []byte(gptTranslated)
 	}
 
+	// FIXME: Why was this cache stuff implemented? This is confusing AF
 	err = SetStructureCache(ctx, keyToken, inputStructure) 
 	if err != nil {
-		log.Printf("[ERROR] Error in SetStructureCache: %v", err)
+		log.Printf("[ERROR] Schemaless: problem in SetStructureCache for keyToken %#v with inputStructure %#v: %v", keyToken, inputStructure, err)
+		return []byte{}, err
 	}
 
 	returnStructure, err := GetStructureFromCache(ctx, keyToken)
 	if err != nil {
-		log.Printf("[WARNING] Error in return structure. Should run OpenAI and set cache!")
-	} else {
-		//log.Printf("[INFO] Structure received: %v", returnStructure)
+		log.Printf("[ERROR] Schemaless: problem in return structure for keyToken %#v. Should run OpenAI and set cache!", keyToken)
+		return []byte{}, err
 	}
 
 	//log.Printf("[DEBUG] Structure received: %v", returnStructure)
@@ -946,7 +1067,11 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 	return translation, nil
 }
 
-
+func init() { 
+	if os.Getenv("DEBUG") == "true" { 
+		debug = true
+	}
+}
 
 
 

@@ -21,8 +21,10 @@ func MapValueToLocation(mapToSearch map[string]interface{}, location, value stri
 	// Iterate over the map and search for the location
 	for key, mapValue := range mapToSearch {
 		if key != locationParts[0] {
+			log.Printf("BAD LOCATIONPART: %#v -> %#v", key, locationParts[0])
 			continue
 		}
+		log.Printf("GOOD LOCATIONPART: %#v -> %#v", key, locationParts[0])
 
 		if len(locationParts) == 1 {
 			// We've reached the end of the location, set the value
@@ -34,20 +36,48 @@ func MapValueToLocation(mapToSearch map[string]interface{}, location, value stri
 				for k, v := range val {
 					newMap[k] = v
 				}
+
 			} else if val, ok := mapValue.([]interface{}); ok {
-				log.Printf("[ERROR] Schemaless handling []interface{} with arbitary values. This MAY not work. MapValue: %#v", mapValue)
+				// So in this case, the 'content' itself is an array.
+				// This means we need to check the NEXT variable, which should be
+				// #, #0, #1, #0-2 etc.
+				log.Printf("[ERROR] Schemaless handling []interface{} with arbitary values. This MAY not work. '%#v' -> %#v", key, mapValue)
+				newMap[key] = make([]interface{}, 0)
 				for i, v := range val {
-					if mapValue, ok := v.(map[string]interface{}); ok {
-						newMap[fmt.Sprintf("#%d", i)] = mapValue
+					log.Printf("%#v: %#v", i, v)
+					if subValue, ok := v.(map[string]interface{}); ok {
+						//newMap[key] = append(subValue[key].([]interface{}), mapValue)
+						//_ = subValue 
+						splitLocationParts := locationParts[1:]
+						if len(splitLocationParts) < 2 {
+							log.Printf("[ERROR] Schemaless: handling []interface{} with arbitary values. This MAY not work. '%#v' -> %#v", key, mapValue)
+							continue
+						}
+
+						if strings.Contains(splitLocationParts[0], "#") {
+							// Remove first index
+							splitLocationParts = splitLocationParts[1:]
+						}
+
+						splitLocationString := strings.Join(splitLocationParts[1:], ".")
+						log.Printf("\n\nSPLIT LOCATION PARTs: %#v\n\nString: %s", splitLocationParts, splitLocationString)
+						loopResp := MapValueToLocation(subValue, splitLocationString, value)
+						log.Printf("Loop response: %#v", loopResp)
+						newMap[key] = loopResp
+
 					} else {
-						newMap[fmt.Sprintf("#%d", i)] = v
+						log.Printf("[ERROR] Schemaless: No LOOP sub-handler for type %#v. Value: %#v", reflect.TypeOf(v).String(), v)
 					}
 				}
+
+				mapToSearch[key] = newMap
+				continue
 			} else {
 				log.Printf("[ERROR] Schemaless handling unknown type %#v. Value: %#v", reflect.TypeOf(mapValue).String(), value)
 				continue
 			}
 
+			// Recurse and go deeper (:
 			mapToSearch[key] = MapValueToLocation(newMap, strings.Join(locationParts[1:], "."), value)
 		}
 	}
@@ -84,9 +114,10 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 			if strings.HasPrefix(val, "{") && strings.HasSuffix(val, "}") && strings.Contains(val, "\"") {
 
 				mapped := make(map[string]interface{})
-				_ = json.Unmarshal([]byte(val), &mapped)
-				//if err != nil {
-				//	log.Printf("[ERROR] Unmarshalling failed for JSON: %v", err)
+				err := json.Unmarshal([]byte(val), &mapped)
+				if err != nil {
+					log.Printf("[ERROR] Unmarshalling failed for JSON: %v", err)
+				}
 				//} else {
 				//	log.Printf("JSON found: %#v", mapped)
 				//}
@@ -170,26 +201,25 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 							newMap[k] = fmt.Sprintf("%s.#%d.%s", key, i, v)
 						}
 					} else {
-						log.Printf("[ERROR] Schemaless reverse: No sublist handler for type %#v", reflect.TypeOf(v).String())
+						log.Printf("[ERROR] Schemaless reverse: No sublist handler for type %#v\n\nFull val: %#v", reflect.TypeOf(v).String(), val)
 					}
 
 					//newMap[matching] = key + ".#" + string(i)
 				}
 			} else {
-				log.Printf("[ERROR] Schemaless reverse: No base handler for type %#v", reflect.TypeOf(value).String())
+				log.Printf("\n\n\n[ERROR] Schemaless reverse: No base handler for type %#v. Value: %#v\n\n\n", reflect.TypeOf(value).String(), value)
 			}
 
 			continue
 		}
 
+		// FIXME: This can crash, no? 
+		// Requires weird input, but could happen
 		matching := FindMatchingString(value.(string), searchInMap)
 		if len(matching) == 0 {
-			//log.Printf("No matching found for %#v", value)
 			continue
 		}
 
-		//log.Printf("[DEBUG] Matching for %#v: %s", value, matching)
-		//newMap[key] = matching
 		newMap[matching] = key
 	}
 
