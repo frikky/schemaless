@@ -1,6 +1,6 @@
 module github.com/frikky/schemaless
 
-go 1.20
+go 1.23.0
 
 require (
 	github.com/bradfitz/gomemcache v0.0.0-20230905024940-24af94b03874
@@ -14,6 +14,6 @@ require (
 require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
-	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519 // indirect
+	golang.org/x/crypto v0.35.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
 )
