@@ -21,10 +21,8 @@ func MapValueToLocation(mapToSearch map[string]interface{}, location, value stri
 	// Iterate over the map and search for the location
 	for key, mapValue := range mapToSearch {
 		if key != locationParts[0] {
-			log.Printf("BAD LOCATIONPART: %#v -> %#v", key, locationParts[0])
 			continue
 		}
-		log.Printf("GOOD LOCATIONPART: %#v -> %#v", key, locationParts[0])
 
 		if len(locationParts) == 1 {
 			// We've reached the end of the location, set the value
@@ -41,16 +39,118 @@ func MapValueToLocation(mapToSearch map[string]interface{}, location, value stri
 				// So in this case, the 'content' itself is an array.
 				// This means we need to check the NEXT variable, which should be
 				// #, #0, #1, #0-2 etc.
-				log.Printf("[ERROR] Schemaless handling []interface{} with arbitary values. This MAY not work. '%#v' -> %#v", key, mapValue)
-				newMap[key] = make([]interface{}, 0)
+				// FIXME: check the NEXT key for LOOP variables to put it in the RIGHT index
+				// if it's in #, put it in ALL
+				correctIndexes := []int{}
+				if len(locationParts) > 1 && strings.HasPrefix(locationParts[1], "#") {
+					if locationParts[1] == "#" {
+						for i, _ := range val {
+							correctIndexes = append(correctIndexes, i)
+						}
+					} else if strings.Contains(locationParts[1], "-") {
+						// Split the string into parts
+						parts := strings.Split(locationParts[1], "-")
+						if len(parts) != 2 {
+							log.Printf("[ERROR] Schemaless: Bad loop mapping with key %#v -> %#v (1)", locationParts[0], locationParts[1])
+							continue
+						}
+
+						// Get the start and end indexes
+						startIndex := strings.TrimPrefix(parts[0], "#")
+						endIndex := strings.TrimPrefix(parts[1], "#")
+						startIndexInt := 0
+						endIndexInt := 0
+
+						_, err := fmt.Sscanf(startIndex, "%d", &startIndexInt)
+						if err != nil {
+							if len(startIndex) == 0 || startIndex == "min" {
+								startIndexInt = 0
+							} else {
+								log.Printf("[ERROR] Schemaless: Bad loop mapping with key %#v -> %#v (2)", locationParts[0], locationParts[1])
+								continue
+							}
+						}
+
+						_, err = fmt.Sscanf(endIndex, "%d", &endIndexInt)
+						if err != nil {
+							if len(endIndex) == 0 || endIndex == "max" {
+								endIndexInt = len(val) - 1
+							} else {
+								log.Printf("[ERROR] Schemaless: Bad loop mapping with key %#v -> %#v (3)", locationParts[0], locationParts[1])
+								continue
+							}
+						}
+
+						// Check if the start and end indexes are valid
+						if startIndexInt < 0 {
+							log.Printf("[ERROR] Schemaless: Bad loop mapping with key %#v -> %#v (4)", locationParts[0], locationParts[1])
+							continue
+						}
+
+						// Add the indexes to the array
+						for i := startIndexInt; i <= endIndexInt; i++ {
+							correctIndexes = append(correctIndexes, i)
+						}
+					} else if strings.Contains(locationParts[0], "#") {
+						// Find the number after # and use it statically
+						index := strings.TrimPrefix(locationParts[1], "#")
+						indexInt := 0
+						_, err := fmt.Sscanf(index, "%d", &indexInt)
+						if err != nil {
+							if index == "min" {
+								indexInt = 0
+							} else if index == "max" {
+								indexInt = len(val) - 1
+							} else {
+								log.Printf("[ERROR] Schemaless: Bad loop mapping with key %#v -> %#v (5)", locationParts[0], locationParts[1])
+								continue
+							}
+						}
+
+						// Check if the index is valid
+						if indexInt < 0 {
+							log.Printf("[ERROR] Schemaless: Bad loop mapping with key %#v -> %#v (6)", locationParts[0], locationParts[1])
+							continue
+						}
+
+						// Add the index to the array
+						correctIndexes = append(correctIndexes, indexInt)
+					} else {
+						for i, _ := range val {
+							correctIndexes = append(correctIndexes, i)
+						}
+					}
+
+				} else {
+					// Add all indexes to the array (lol)
+					for i, _ := range val {
+						correctIndexes = append(correctIndexes, i)
+					}
+				}
+
+				//newMap[key] = make([]interface{}, 0)
+				loopMap := make([]interface{}, 0)
 				for i, v := range val {
-					log.Printf("%#v: %#v", i, v)
+					foundIndex := false
+					for _, index := range correctIndexes {
+						if i == index {
+							foundIndex = true
+							break
+						}
+					}
+
+					if !foundIndex {
+						loopMap = append(loopMap, v)
+						continue
+					}
+
+
 					if subValue, ok := v.(map[string]interface{}); ok {
 						//newMap[key] = append(subValue[key].([]interface{}), mapValue)
 						//_ = subValue 
 						splitLocationParts := locationParts[1:]
 						if len(splitLocationParts) < 2 {
-							log.Printf("[ERROR] Schemaless: handling []interface{} with arbitary values. This MAY not work. '%#v' -> %#v", key, mapValue)
+							log.Printf("[ERROR] Schemaless: (1) handling []interface{} with arbitary values. This MAY not work. '%#v' -> %#v", key, mapValue)
 							continue
 						}
 
@@ -59,18 +159,19 @@ func MapValueToLocation(mapToSearch map[string]interface{}, location, value stri
 							splitLocationParts = splitLocationParts[1:]
 						}
 
-						splitLocationString := strings.Join(splitLocationParts[1:], ".")
-						log.Printf("\n\nSPLIT LOCATION PARTs: %#v\n\nString: %s", splitLocationParts, splitLocationString)
-						loopResp := MapValueToLocation(subValue, splitLocationString, value)
-						log.Printf("Loop response: %#v", loopResp)
-						newMap[key] = loopResp
+						// Recurse
+						loopMap = append(loopMap, MapValueToLocation(subValue, strings.Join(splitLocationParts, "."), value))
 
 					} else {
-						log.Printf("[ERROR] Schemaless: No LOOP sub-handler for type %#v. Value: %#v", reflect.TypeOf(v).String(), v)
+						//if debug { 
+						//	log.Printf("[DEBUG] Schemaless: No LOOP sub-handler for replacing values of type %#v. Value: %#v", reflect.TypeOf(v).String(), v)
+						//}
+
+						loopMap = append(loopMap, v)
 					}
 				}
 
-				mapToSearch[key] = newMap
+				mapToSearch[key] = loopMap 
 				continue
 			} else {
 				log.Printf("[ERROR] Schemaless handling unknown type %#v. Value: %#v", reflect.TypeOf(mapValue).String(), value)
