@@ -388,7 +388,10 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		body = []byte(cache.([]uint8))
 		//return cacheData, nil
 	} else {
-		log.Printf("[INFO] Schemaless: Finding file %#v in category %#v from Shuffle backend", name, category)
+		if debug { 
+			log.Printf("[DEBUG] Schemaless: Finding file %#v in category %#v from Shuffle backend", name, category)
+		}
+
 		if len(shuffleConfig.ExecutionId) > 0 {
 			categoryUrl += "&execution_id=" + shuffleConfig.ExecutionId
 		}

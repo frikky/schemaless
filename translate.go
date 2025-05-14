@@ -28,7 +28,7 @@ import (
 //var chosenModel = "gpt-4-turbo-preview"
 var chosenModel = "o4-mini"
 var maxInputSize = 4000
-var debug = false
+var debug = os.Getenv("DEBUG") == "true"
 
 func getRootFolder() string { 
 	rootFolder := ""
@@ -78,7 +78,10 @@ func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig)
 		return err
 	}
 
-	log.Printf("[INFO] Schemaless: Translation saved to %s", filename)
+	if debug { 
+		log.Printf("[DEBUG] Schemaless: Translation saved to %s", filename)
+	}
+
 	return nil
 }
 
@@ -88,7 +91,7 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleC
 	//additionalCondition := fmt.Sprintf("If the key '%s' matches exactly to a field, add '%s' itself instead of any jq format. ", inputToken, inputToken)
 	additionalCondition := fmt.Sprintf("")
 
-	systemMessage := fmt.Sprintf("Ensure the output is valid JSON, and does NOT add more keys to the standard. Make sure each key in the standard has a value from the user input. If values are nested, ALWAYS add the nested value in jq format such as 'secret.version.value'. %sExample: If the standard is ```{\"id\": \"The id of the ticket\", \"title\": \"The ticket title\"}```, and the user input is ```{\"key\": \"12345\", \"fields:\": {\"summary\": \"The title of the ticket\"}}```, the output should be ```{\"id\": \"key\", \"title\": \"fields.summary\"}```", additionalCondition)
+	systemMessage := fmt.Sprintf("Ensure the output is valid JSON, and does NOT add more keys to the standard. Make sure each important key from the user input is in the standard. Empty fields in the standard are ok. If values are nested, ALWAYS add the nested value in jq format such as 'secret.version.value'. %sExample: If the standard is ```{\"id\": \"The id of the ticket\", \"title\": \"The ticket title\"}```, and the user input is ```{\"key\": \"12345\", \"fields:\": {\"summary\": \"The title of the ticket\"}}```, the output should be ```{\"id\": \"key\", \"title\": \"fields.summary\"}```", additionalCondition)
 
 	userQuery := fmt.Sprintf("Translate the given user input JSON structure to a standard format. Use the values from the standard to guide you what to look for. The standard format should follow the pattern:\n\n```json\n%s\n```\n\nUser Input:\n```json\n%s\n```\n\nGenerate the standard output structure without providing the expected output.", standardFormat, inputDataFormat)
 
@@ -429,7 +432,10 @@ func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleC
 		return err
 	}
 
-	log.Printf("[INFO] Schemaless: Translation saved to %s", filename)
+	if debug { 
+		log.Printf("[DEBUG] Schemaless: Translation saved to %s", filename)
+	}
+
 	return nil
 }
 
@@ -456,7 +462,10 @@ func SaveParsedInput(inputStandard string, gptTranslated []byte, shuffleConfig S
 		return err
 	}
 
-	log.Printf("[INFO] Schemaless: Translation saved to %s", filename)
+	if debug { 
+		log.Printf("[DEBUG] Schemaless: Translation saved to %s", filename)
+	}
+
 	return nil
 }
 
@@ -1070,6 +1079,12 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 func init() { 
 	if os.Getenv("DEBUG") == "true" { 
 		debug = true
+	}
+
+	if len(os.Getenv("MODEL")) > 0 {
+		chosenModel = os.Getenv("MODEL")
+
+		log.Printf("[INFO] Schemaless: Using model %s", chosenModel)
 	}
 }
 
