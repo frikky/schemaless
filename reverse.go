@@ -307,6 +307,14 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 
 					//newMap[matching] = key + ".#" + string(i)
 				}
+
+			/*
+			} else if val, ok := value.(float64); ok {
+				log.Printf("\n\n\n[DEBUG] Got float64: %#v. Key: %#v\n\n\n", key, val)
+				// Check if it's a list and try to find the value in it
+				newMap[fmt.Sprintf("%f", val)] = key
+			*/
+
 			} else {
 				log.Printf("\n\n\n[ERROR] Schemaless reverse: No base handler for type %#v. Value: %#v\n\n\n", reflect.TypeOf(value).String(), value)
 			}

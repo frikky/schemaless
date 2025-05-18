@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 	"errors"
+	"reflect"
 	"strings"
 	"io/ioutil"
 	"crypto/md5"
@@ -79,7 +80,7 @@ func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig)
 	}
 
 	if debug { 
-		log.Printf("[DEBUG] Schemaless: Translation saved to %s", filename)
+		log.Printf("[DEBUG] Schemaless: Translation saved to %s (1)", filename)
 	}
 
 	return nil
@@ -433,7 +434,7 @@ func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleC
 	}
 
 	if debug { 
-		log.Printf("[DEBUG] Schemaless: Translation saved to %s", filename)
+		log.Printf("[DEBUG] Schemaless: Translation saved to %s (2)", filename)
 	}
 
 	return nil
@@ -462,9 +463,11 @@ func SaveParsedInput(inputStandard string, gptTranslated []byte, shuffleConfig S
 		return err
 	}
 
+	/*
 	if debug { 
-		log.Printf("[DEBUG] Schemaless: Translation saved to %s", filename)
+		log.Printf("[DEBUG] Schemaless: Response keys saved to %s (3)", filename)
 	}
+	*/
 
 	return nil
 }
@@ -528,6 +531,14 @@ func LoadAndSaveStandard(inputStandard string) (error) {
 	owner := "shuffle"
 	repo := "standards"
 	path := "translation_standards"
+	if os.Getenv("GIT_DOWNLOAD_USER") != "" {
+		owner = os.Getenv("GIT_DOWNLOAD_USER")
+	}
+
+	if os.Getenv("GIT_DOWNLOAD_REPO") != "" {
+		repo = os.Getenv("GIT_DOWNLOAD_REPO")
+	}
+
 	foundFiles, err := LoadStandardFromGithub(*client, owner, repo, path, inputStandard)
 
 	if debug { 
@@ -645,7 +656,7 @@ func GetExistingStructure(inputStandard string, shuffleConfig ShuffleConfig) ([]
 }
 
 // Recurses to find keys deeper in the thingy
-// FIXME: Does not support loops yet
+// FIXME: Does NOT support loops yet
 // Should be able to handle jq/shuffle-json format
 func recurseFindKey(input map[string]interface{}, key string, depth int) (string, error) {
 	keys := strings.Split(key, ".")
@@ -659,7 +670,10 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 		}
 
 		if len(keys) == 1 {
-			if val, ok := v.(string); ok {
+			// Check if v is nil
+			if v == nil {
+				return "", nil
+			} else if val, ok := v.(string); ok {
 				return val, nil
 			} else if val, ok := v.(map[string]interface{}); ok {
 				if b, err := json.MarshalIndent(val, "", "\t"); err != nil {
@@ -680,7 +694,7 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 			} else if val, ok := v.(int); ok {
 				return fmt.Sprintf("%v", val), nil
 			} else {
-				return "", fmt.Errorf("Value is not a string or map[string]interface{}")
+				return "", fmt.Errorf("Value is not a string or map[string]interface{}, but %#v", reflect.TypeOf(v))
 			}
 
 			return v.(string), nil
