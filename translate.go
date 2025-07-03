@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"io/ioutil"
+	"math/rand"
 	"crypto/md5"
 	"encoding/json"
 	"sync"
@@ -88,11 +89,14 @@ func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig)
 
 func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleConfig ShuffleConfig) (string, error) {
 
-	//inputToken := "apikey"
-	//additionalCondition := fmt.Sprintf("If the key '%s' matches exactly to a field, add '%s' itself instead of any jq format. ", inputToken, inputToken)
+
 	additionalCondition := fmt.Sprintf("")
 
 	systemMessage := fmt.Sprintf("Ensure the output is valid JSON, and does NOT add more keys to the standard. Make sure each important key from the user input is in the standard. Empty fields in the standard are ok. If values are nested, ALWAYS add the nested value in jq format such as 'secret.version.value'. %sExample: If the standard is ```{\"id\": \"The id of the ticket\", \"title\": \"The ticket title\"}```, and the user input is ```{\"key\": \"12345\", \"fields:\": {\"summary\": \"The title of the ticket\"}}```, the output should be ```{\"id\": \"key\", \"title\": \"fields.summary\"}```", additionalCondition)
+
+	if debug { 
+		log.Printf("[DEBUG] Schemaless: Running GPT (1) with system message: %s", systemMessage)
+	}
 
 	userQuery := fmt.Sprintf("Translate the given user input JSON structure to a standard format. Use the values from the standard to guide you what to look for. The standard format should follow the pattern:\n\n```json\n%s\n```\n\nUser Input:\n```json\n%s\n```\n\nGenerate the standard output structure without providing the expected output.", standardFormat, inputDataFormat)
 
@@ -108,7 +112,38 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleC
 	ctx := context.Background()
 	md5Query := fmt.Sprintf("%x", md5.Sum([]byte(shuffleConfig.OrgId+systemMessage+userQuery)))
 
+	// 0 - 500ms delay to ensure 50+ queries don't run for the same query at the same time
+	// This ensures we MAY get very few requests instead of a ton of them
+	randomSleeptime := time.Duration(rand.Intn(500)) 
+	time.Sleep(randomSleeptime * time.Millisecond)
+
 	cacheKey := fmt.Sprintf("translationquery-%s", md5Query)
+	cacheKeyStarted := fmt.Sprintf("translationquery-%s-started", md5Query)
+	found, err := GetCache(ctx, cacheKeyStarted)
+	if err == nil && found != nil {
+		// ~30 seconds to finish the query should be enough
+		maxIter := 6
+		sleepTime := 5
+		cnt := 0
+		for {
+			cache, err := GetCache(ctx, cacheKey)
+			if err == nil {
+				contentOutput := string([]byte(cache.([]uint8)))
+				return contentOutput, nil
+			}
+
+			if cnt >= maxIter {
+				break
+			}
+
+			cnt += 1
+			time.Sleep(time.Duration(sleepTime) * time.Second)
+		}
+
+	} else {
+		SetCache(ctx, cacheKeyStarted, []byte("started"), 1)
+	}
+
 	cache, err := GetCache(ctx, cacheKey)
 	if err == nil {
 		contentOutput := string([]byte(cache.([]uint8)))
@@ -116,7 +151,7 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleC
 	}
 
 	if debug { 
-		log.Printf("[DEBUG] Schemaless: Running GPT with system message: %s", systemMessage)
+		log.Printf("[DEBUG] Schemaless: Running GPT (2) with system message: %s", systemMessage)
 	}
 
 	SaveQuery(keyTokenFile, userQuery, shuffleConfig)
@@ -710,7 +745,7 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 		}
 	}
 
-	return "", errors.New("Key not found")
+	return "", errors.New(fmt.Sprintf("Key '%s' not found", key))
 }
 
 func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[string]interface{}) ([]byte, []byte, error) {
@@ -1010,8 +1045,13 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 			return inputValue, nil
 		}
 
+		if debug {
+			log.Printf("[DEBUG] Schemaless: Got standard format for standard '%s': %s", inputStandard, string(standardFormat))
+		}
+
+		//if !skipSubstandard && len(trimmedStandard) > 2 && strings.Contains(trimmedStandard, ".json") && strings.HasPrefix(trimmedStandard, "[") && strings.HasSuffix(trimmedStandard, "]") {
 		trimmedStandard := strings.TrimSpace(string(standardFormat))
-		if !skipSubstandard && len(trimmedStandard) > 2 && strings.Contains(trimmedStandard, ".json") && strings.HasPrefix(trimmedStandard, "[") && strings.HasSuffix(trimmedStandard, "]") {
+		if !skipSubstandard && len(trimmedStandard) > 2 && strings.HasPrefix(trimmedStandard, "[") && strings.HasSuffix(trimmedStandard, "]") {
 
 			standardName := strings.TrimSuffix(strings.TrimPrefix(trimmedStandard, "["), "]")
 			log.Printf("[DEBUG] Schemaless: Found a JSON array in the standard. Should convert it to a map[string]interface{}. Name: %s", standardName)
@@ -1037,6 +1077,8 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 			}
 
 			return []byte{}, errors.New("Finding substandard and list parsing")
+		} else {
+			log.Printf("[DEBUG] Schemaless: No substandard found in the standard format for '%s'. Should continue with translation", inputStandard)
 		}
 
 		gptTranslated, err := GptTranslate(keyTokenFile, string(standardFormat), string(returnJson), shuffleConfig)

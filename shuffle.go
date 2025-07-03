@@ -399,6 +399,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		if debug { 
 			log.Printf("[DEBUG] Getting category WITHOUT cache from '%s'", categoryUrl)
 		}
+
 		req, err := http.NewRequest(
 			"GET", 
 			categoryUrl,
@@ -406,6 +407,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		)
 
 		if err != nil {
+			log.Printf("[ERROR] Schemaless (2): Error getting category %#v from Shuffle backend: %s", category, err)
 			return []byte{}, err
 		}
 
@@ -431,6 +433,10 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		if resp.StatusCode != 200 {
 			log.Printf("[ERROR] Schemaless: Bad status code (2) getting category %#v from Shuffle backend %#v: %s", category, categoryUrl, resp.Status)
 			return []byte{}, errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
+		}
+
+		if debug { 
+			log.Printf("[DEBUG] Schemaless: Got category %#v from Shuffle backend. Resp: %d", category, resp.StatusCode)
 		}
 	}
 
@@ -467,6 +473,10 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		if err != nil {
 			log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", name, err)
 			return []byte{}, err
+		}
+
+		if debug { 
+			log.Printf("[DEBUG] Schemaless: Found file '%s' in category '%s' with ID '%s'", name, category, file.Id)
 		}
 
 		return downloadedFile, nil
