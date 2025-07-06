@@ -691,7 +691,7 @@ func GetExistingStructure(inputStandard string, shuffleConfig ShuffleConfig) ([]
 }
 
 // Recurses to find keys deeper in the thingy
-// FIXME: Does NOT support loops yet
+// FIXME: Does NOT fully support loops yet
 // Should be able to handle jq/shuffle-json format
 func recurseFindKey(input map[string]interface{}, key string, depth int) (string, error) {
 	keys := strings.Split(key, ".")
@@ -735,13 +735,71 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 			return v.(string), nil
 		}
 
-		if _, ok := v.(map[string]interface{}); ok {
-			foundValue, err := recurseFindKey(v.(map[string]interface{}), strings.Join(keys[1:], "."), depth + 1)
+		parsedKey := strings.Join(keys[1:], ".")
+		if mapValue, ok := v.(map[string]interface{}); ok {
+			foundValue, err := recurseFindKey(mapValue, parsedKey, depth + 1)
+
+			// Some basic error handling for "weird" keys
 			if err != nil {
-				log.Printf("[ERROR] Schemaless (5): %v", err)
+				// Looks for quotation issues in translations
+				if strings.HasPrefix(parsedKey, `"`) && strings.Count(parsedKey, `"`) > 1 {
+					// If the key is wrapped in quotes, remove them
+					parsedKey = strings.ReplaceAll(parsedKey, `"`, "")
+					foundValue, err = recurseFindKey(mapValue, parsedKey, depth + 1)
+					if err != nil {
+						log.Printf("[ERROR] Schemaless reverse (6): %v", err)
+					} else {
+						return foundValue, nil
+					}
+				}
+
+				//if debug { 
+				//	log.Printf("[DEBUG] Schemaless reverse (5): %v", err)
+				//}
 			} else {
 				return foundValue, nil
 			}
+		} else if listValue, ok := v.([]interface{}); ok {
+			marshalledMap, err := json.MarshalIndent(listValue, "", "\t")
+			if err != nil {
+				log.Printf("[ERROR] Schemaless reverse (11): Error marshalling list value: %v", err)
+			} 
+
+			// Checks if we are supposed to chekc the list or not
+			if len(parsedKey) > 0 && string(parsedKey[0]) == "#" {
+				// Trim until first dot (.)
+				if strings.Contains(parsedKey, ".") {
+					parts := strings.Split(parsedKey, ".")
+					if len(parts) > 1 {
+						// If the key is something like "#.key", then we need to check the list for that key
+						parsedKey = strings.Join(parts[1:], ".")
+					} else {
+						// If the key is something like "#0", then we need to check the list for that index
+						parsedKey = parts[0]
+					}
+				}
+
+				for _, item := range listValue {
+					if itemMap, ok := item.(map[string]interface{}); ok {
+						// Recurse into the item
+						foundValue, err := recurseFindKey(itemMap, parsedKey, depth + 1)
+						if err != nil {
+							if debug { 
+							//log.Printf("[ERROR] Schemaless reverse (9): %v", err)
+							}
+						} else {
+							return foundValue, nil
+						}
+					} else {
+						log.Printf("[ERROR] Schemaless reverse (10): Item in list is not a map[string]interface{}, but %#v", reflect.TypeOf(item))
+					}
+				}
+			} else {
+				log.Printf("[WARNING] Schemaless reverse (8): Invalid key '%s' (%#v) found in list: %v. Should be something like '#0' or '#.key'. Not checking the list.", parsedKey, keys, string(marshalledMap))
+			}
+
+		} else {
+			log.Printf("[ERROR] Schemaless reverse (7): Key '%s' found, but value is not a map[string]interface{}: %v")
 		}
 	}
 
@@ -788,9 +846,22 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 				if strings.Contains(val, ".") {
 					//log.Printf("[DEBUG] Schemaless: Digging deeper to find field %#v in input", translationValue)
 
-					recursed, err := recurseFindKey(parsedInput, translationValue.(string), 0)
+					// Check for ends with item.value[] <- array
+					// This can't be handled properly without being something like .# or .#0
+					key := translationValue.(string)
+					if strings.Contains(key, "[]") {
+						key = strings.ReplaceAll(key, "[]", ".#")
+					}
+
+					if strings.Contains(key, `"`) {
+						key = strings.ReplaceAll(key, `"`, "")
+					}
+
+					recursed, err := recurseFindKey(parsedInput, key, 0)
 					if err != nil {
-						log.Printf("[ERROR] Schemaless: Error in recurseFindKey for %#v: %v", translationValue, err)
+						if debug { 
+							log.Printf("[DEBUG] Schemaless Reverse problem: Error in recurseFindKey for %#v: %v", key, err)
+						}
 					}
 
 					modifiedParsedInput[translationKey] = recursed

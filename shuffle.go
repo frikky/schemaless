@@ -366,8 +366,6 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		return []byte{}, errors.New("Shuffle URL not set")
 	}
 
-
-
 	// 1. Get the category 
 	// 2. Find the file in the category output
 	// 3. Read the file data
@@ -475,9 +473,9 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 			return []byte{}, err
 		}
 
-		if debug { 
-			log.Printf("[DEBUG] Schemaless: Found file '%s' in category '%s' with ID '%s'", name, category, file.Id)
-		}
+		//if debug { 
+		//	log.Printf("[DEBUG] Schemaless: Found file '%s' in category '%s' with ID '%s'", name, category, file.Id)
+		//}
 
 		return downloadedFile, nil
 	}
