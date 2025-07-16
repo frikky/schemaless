@@ -23,6 +23,7 @@ import (
 	"encoding/base64"
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/google/go-github/v28/github"
+	"github.com/osteele/liquid"
 
 	"context"
 )
@@ -33,7 +34,7 @@ var maxInputSize = 4000
 var debug = os.Getenv("DEBUG") == "true"
 
 func getRootFolder() string { 
-	rootFolder := ""
+	rootFolder := "files"
 	filepath := os.Getenv("FILE_LOCATION")
 	if len(filepath) > 0 {
 		rootFolder = filepath
@@ -201,6 +202,32 @@ func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleC
 	}
 
 	return contentOutput, nil
+}
+
+func LiquidTranslate(ctx context.Context, userInput, translatedInput []byte) ([]byte, error) {
+	engine := liquid.NewEngine()
+	//template := `<h1>{{ page.title }}</h1>`
+	template := string(translatedInput)
+
+	// UserInput is used for variables - 
+	// e.g. : {% if errorCode == null %}1{% else %}2{% endif %}
+	// This means it should look for "errorCode" as a variable
+
+	bindings := map[string]interface{}{}
+	// Unmarshal the userInput into bindings
+	err := json.Unmarshal(userInput, &bindings)
+	if err != nil {
+		log.Printf("[ERROR] Schemaless Liquid: Error unmarshalling userInput in LiquidTranslate: %v", err)
+	}
+
+	out, err := engine.ParseAndRenderString(template, bindings)
+	if err != nil { 
+		log.Printf("[ERROR] Schemaless Liquid: Error parsing and rendering template in LiquidTranslate: %v", err)
+	}
+
+	log.Printf("OUT: %s", out)
+
+	return []byte(out), nil 
 }
 
 func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[string]interface{}, error) {
@@ -642,7 +669,7 @@ func GetStandard(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, err
 			return []byte{}, err
 		}
 
-		log.Printf("[INFO] Done loading standard '%s' from Shuffle's Github standards", inputStandard)
+		log.Printf("[INFO] Done loading standard '%s' from Shuffle's Github standards. Path: %s", inputStandard, filepath)
 
 		// Re-instantiate referece to the file 
 		jsonFile, err = os.Open(filepath)
@@ -832,7 +859,6 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 				continue
 			}
 
-
 			//log.Printf("Found field %#v in input", inputKey)
 			modifiedParsedInput[translationKey] = inputValue
 
@@ -842,7 +868,44 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 		}
 
 		if !found {
-			if val, ok := translationValue.(string); ok {
+			// Skipping (for now?)
+			if _, ok := translationValue.(float64); ok {
+				if debug { 
+					log.Printf("[DEBUG] NOT handling float/integer translations and keeping value instead. Key: %s, Value: %v", translationKey, translationValue)
+				}
+
+				translatedInput[translationKey] = translationValue
+			} else if val, ok := translationValue.(map[string]interface{}); ok {
+
+				// Recurse it with the same function again
+				translation, _, err := runJsonTranslation(ctx, inputValue, val)
+				if err != nil {
+					log.Printf("[ERROR] Schemaless: Error in runJsonTranslation for key '%s': %v", translationKey, err)
+					translatedInput[translationKey] = translationValue
+					continue
+				}
+
+				// Translation here is in base64, so we need to unmarshal it again
+				var translationValueParsed map[string]interface{}
+
+				err = json.Unmarshal([]byte(translation), &translationValueParsed)
+				if err != nil {
+					log.Printf("[ERROR] Schemaless: Error in unmarshalling translation value for key '%s': %v", translationKey, err)
+					translatedInput[translationKey] = translationValue
+					continue
+				}
+
+				// Check if the translationValueParsed is empty
+				if len(translationValueParsed) == 0 {
+					log.Printf("[WARNING] Schemaless: Translation value for key '%s' is empty after unmarshalling. Skipping it.", translationKey)
+					translatedInput[translationKey] = translationValue
+					continue
+				}
+
+				translatedInput[translationKey] = translationValueParsed
+
+
+			} else if val, ok := translationValue.(string); ok {
 				if strings.Contains(val, ".") {
 					//log.Printf("[DEBUG] Schemaless: Digging deeper to find field %#v in input", translationValue)
 
@@ -866,9 +929,13 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 
 					modifiedParsedInput[translationKey] = recursed
 					translatedInput[translationKey] = recursed
+				} else {
+					translatedInput[translationKey] = val
 				}
 			} else {
 				log.Printf("[ERROR] Schemaless: Field %#v not found in input", translationValue)
+
+				translatedInput[translationKey] = translationValue
 			}
 		}
 	}
@@ -897,7 +964,7 @@ func fixPaths() {
 		folderpath := fmt.Sprintf("%s%s", getRootFolder(), folder)
 		if _, err := os.Stat(folderpath); os.IsNotExist(err) {
 			if debug { 
-				log.Printf("[DEBUG] Schemaless: Folder '%s' does not exist, creating it", folder)
+				log.Printf("[DEBUG] Schemaless: Folder '%s' does not exist, creating it", folderpath)
 			}
 
 			err = os.MkdirAll(folderpath, 0755)
