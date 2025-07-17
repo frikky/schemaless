@@ -932,7 +932,7 @@ func handleMultiListItems(translatedInput []interface{}, parentKey string, parse
 		} else if val, ok := v.(string); ok {
 			log.Printf("string: %s", childKey)
 			if strings.Contains(val, "schemaless_list[") {
-				log.Printf("SCHEMALESS LIST FOUND")
+				log.Printf("SCHEMALESS LIST FOUND: %s", val)
 
 				foundList := strings.Split(val, "schemaless_list")
 				if len(foundList) >= 2 {
@@ -943,23 +943,21 @@ func handleMultiListItems(translatedInput []interface{}, parentKey string, parse
 					}
 
 					log.Printf("Keys: %d", len(unmarshalledList))
-					if len(translatedInput) < len(unmarshalledList) {
 
-						// Reference Item
-						firstItem := translatedInput[0]
-						for cnt, listValue := range unmarshalledList {
-							if cnt >= len(translatedInput) {
-								translatedInput = append(translatedInput, firstItem)
-							}
-
-							// Update the translatedInput with the new value
-							newKey := fmt.Sprintf("%s.%s", parentKey, childKey)
-							// Remove the first key
-							newKey = strings.SplitN(newKey, ".", 2)[1]
-							translatedInput[cnt] = setNestedMap(translatedInput[cnt].(map[string]interface{}), newKey, listValue)
-
-							log.Printf("\n\nCNT: %d, NewKey: %s, ListValue: %s\n\n", cnt, newKey, listValue)
+					// Reference Item
+					firstItem := translatedInput[0]
+					for cnt, listValue := range unmarshalledList {
+						if cnt >= len(translatedInput) {
+							translatedInput = append(translatedInput, firstItem)
 						}
+
+						// Update the translatedInput with the new value
+						newKey := fmt.Sprintf("%s.%s", parentKey, childKey)
+						// Remove the first key
+						newKey = strings.SplitN(newKey, ".", 2)[1]
+						translatedInput[cnt] = setNestedMap(translatedInput[cnt].(map[string]interface{}), newKey, listValue)
+
+						log.Printf("\n\nCNT: %d, NewKey: %s, ListValue: %s\n\n", cnt, newKey, listValue)
 					}
 				}
 			}
@@ -969,7 +967,6 @@ func handleMultiListItems(translatedInput []interface{}, parentKey string, parse
 		}
 	}
 
-	log.Printf("TRANSLATEDINPUT: %#v", translatedInput)
 	return translatedInput
 }
 
@@ -1062,7 +1059,6 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 
 					// Hard to optimise for subkeys -> parent control tho
 					if strings.Contains(string(output), "schemaless_list[") {
-						log.Printf("WHAT IS THE KEY HERE? %#v. Output: %s", translationKey, output)
 						newTranslatedInput := handleMultiListItems(newOutput, translationKey, outputParsed)
 						translationValue = newTranslatedInput
 
