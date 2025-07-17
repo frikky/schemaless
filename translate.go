@@ -851,16 +851,18 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 	return "", errors.New(fmt.Sprintf("Key '%s' not found", key))
 }
 
-func setNestedMap(m map[string]interface{}, path string, value interface{}) map[string]interface{} {
+func setNestedMap(m map[string]interface{}, path string, value interface{}) (map[string]interface{}, bool) {
 	keys := strings.Split(path, ".")
 	if len(keys) == 0 {
-		return m
+		return m, false
 	}
 
 	// Build the nested value to merge
+	found := false
 	nested := value
 	for i := len(keys) - 1; i >= 0; i-- {
 		if keys[i] == "#" {
+
 			//nested = []interface{}{nested}
 			//nested = map[string]interface{}{
 			//	keys[i]: nested,
@@ -868,13 +870,22 @@ func setNestedMap(m map[string]interface{}, path string, value interface{}) map[
 			continue
 		} 
 
-		nested = map[string]interface{}{
-			keys[i]: nested,
+		if val, ok := m[keys[i]].(string); ok {
+			if strings.Contains(val, "schemaless_list") {
+				found = true
+				nested = map[string]interface{}{
+					keys[i]: nested,
+				}
+			}
+		} else {
+			nested = map[string]interface{}{
+				keys[i]: nested,
+			}
 		}
 	}
 
 	// Deep merge into the existing map
-	return deepMerge(copyMap(m), nested.(map[string]interface{}))
+	return deepMerge(copyMap(m), nested.(map[string]interface{})), found
 }
 
 // Deep copy of a map to avoid mutating the original
@@ -1001,9 +1012,7 @@ func handleMultiListItems(translatedInput []interface{}, parentKey string, parse
 
 					// Reference Item
 					firstItem := modificationList[0]
-
-					log.Printf("REF ITEM: %#v", firstItem)
-
+					var found bool
 					for cnt, listValue := range unmarshalledList {
 						if cnt >= len(modificationList) {
 							modificationList = append(modificationList, firstItem)
@@ -1015,20 +1024,30 @@ func handleMultiListItems(translatedInput []interface{}, parentKey string, parse
 						newKey = strings.SplitN(newKey, ".", 2)[1]
 
 						cntItem := modificationList[cnt].(map[string]interface{})
-						log.Printf("New value (%d - %#v): %#v inside %#v", cnt, parentKey, listValue, cntItem)
-						modificationList[cnt] = setNestedMap(cntItem, newKey, listValue)
+						modificationList[cnt], found = setNestedMap(cntItem, newKey, listValue)
+						if !found {
+							log.Printf("[ERROR] Schemaless: Could not set nested map for key '%s' with value '%s'", newKey, listValue)
+						}
+
 					}
 
 					if listDepth > 0 { 
-						log.Printf("KEY TO PUT IN: %#v.", oldParentKey)
+						// Updates the parent here too 
+						parsedValues = modificationList[0].(map[string]interface{})
 
 						// FIXME: Problem here is it could be multiple recursion parents.
 						// And it needs to automatically find the right one
-						translatedInput[0] = setNestedMap(translatedInput[0].(map[string]interface{}), oldParentKey, modificationList)
+						oldParentKey = fmt.Sprintf("cve.cvssloop")
+						log.Printf("KEY TO PUT IN: %#v. Value: %s", oldParentKey, modificationList)
+						translatedInput[0], found = setNestedMap(translatedInput[0].(map[string]interface{}), oldParentKey, modificationList)
+						if !found {
+							log.Printf("[ERROR] Schemaless (2): Could not set nested map for key '%s' with value '%s'", oldParentKey, modificationList)
+						}
+
 					}
 
 					marshalled, _ := json.MarshalIndent(translatedInput, "", "\t")
-					log.Printf("MARSHALLED (%d): %s", listDepth, string(marshalled))
+					log.Printf("MARSHALLED (%d): %s. Parsed values: %#v", listDepth, string(marshalled), parsedValues)
 
 					//translatedInput = modificationList
 
