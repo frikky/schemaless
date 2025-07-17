@@ -225,8 +225,6 @@ func LiquidTranslate(ctx context.Context, userInput, translatedInput []byte) ([]
 		log.Printf("[ERROR] Schemaless Liquid: Error parsing and rendering template in LiquidTranslate: %v", err)
 	}
 
-	log.Printf("OUT: %s", out)
-
 	return []byte(out), nil 
 }
 
@@ -717,9 +715,8 @@ func GetExistingStructure(inputStandard string, shuffleConfig ShuffleConfig) ([]
 	return byteValue, nil
 }
 
-// Recurses to find keys deeper in the thingy
-// FIXME: Does NOT fully support loops yet
-// Should be able to handle jq/shuffle-json format
+// Recurses to find keys deeper based on the standard
+// Should be able to handle jq/shuffle-json format (and some liquid)
 func recurseFindKey(input map[string]interface{}, key string, depth int) (string, error) {
 	keys := strings.Split(key, ".")
 	if len(keys) > 1 {
@@ -736,6 +733,7 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 			if v == nil {
 				return "", nil
 			} else if val, ok := v.(string); ok {
+				//log.Printf("STRING RETURN (%s): %#v", k, val)
 				return val, nil
 			} else if val, ok := v.(map[string]interface{}); ok {
 				if b, err := json.MarshalIndent(val, "", "\t"); err != nil {
@@ -792,7 +790,7 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 				log.Printf("[ERROR] Schemaless reverse (11): Error marshalling list value: %v", err)
 			} 
 
-			// Checks if we are supposed to chekc the list or not
+			// Checks if we are supposed to check the list or not
 			if len(parsedKey) > 0 && string(parsedKey[0]) == "#" {
 				// Trim until first dot (.)
 				if strings.Contains(parsedKey, ".") {
@@ -806,21 +804,41 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 					}
 				}
 
+				// This means we need to return MULTIPLE items
+				// Not just a single one (:
+				itemList := []any{}
 				for _, item := range listValue {
 					if itemMap, ok := item.(map[string]interface{}); ok {
 						// Recurse into the item
 						foundValue, err := recurseFindKey(itemMap, parsedKey, depth + 1)
 						if err != nil {
 							if debug { 
-							//log.Printf("[ERROR] Schemaless reverse (9): %v", err)
+								//log.Printf("[ERROR] Schemaless reverse (9): %v", err)
 							}
 						} else {
-							return foundValue, nil
+							// FIXME: Returning one item at a time doesn't work
+							// But returning the whole array means we need to re-construct the same array multiple times over :thinking: 
+							itemList = append(itemList, foundValue)
+							//return foundValue, nil
 						}
 					} else {
 						log.Printf("[ERROR] Schemaless reverse (10): Item in list is not a map[string]interface{}, but %#v", reflect.TypeOf(item))
+						itemList = append(itemList, item)
 					}
 				}
+
+				marshalled, err := json.Marshal(itemList)
+				if err != nil {
+					log.Printf("[ERROR] Schemaless reverse (12): Error marshalling item list: %v", err)
+					return "", err
+				}
+
+				// This is to do some custom parsing that makes
+				// schemaless["value1", "value2"] into the actual parent
+				// list. This is required 
+				
+				// If we get them recursed with .#.# 
+				return "schemaless_list"+string(marshalled), nil
 			} else {
 				log.Printf("[WARNING] Schemaless reverse (8): Invalid key '%s' (%#v) found in list: %v. Should be something like '#0' or '#.key'. Not checking the list.", parsedKey, keys, string(marshalledMap))
 			}
@@ -831,6 +849,128 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 	}
 
 	return "", errors.New(fmt.Sprintf("Key '%s' not found", key))
+}
+
+func setNestedMap(m map[string]interface{}, path string, value interface{}) map[string]interface{} {
+	keys := strings.Split(path, ".")
+	if len(keys) == 0 {
+		return m
+	}
+
+	// Build the nested value to merge
+	nested := value
+	for i := len(keys) - 1; i >= 0; i-- {
+		nested = map[string]interface{}{keys[i]: nested}
+	}
+
+	// Deep merge into the existing map
+	return deepMerge(copyMap(m), nested.(map[string]interface{}))
+}
+
+// Deep copy of a map to avoid mutating the original
+func copyMap(m map[string]interface{}) map[string]interface{} {
+	copy := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		if subMap, ok := v.(map[string]interface{}); ok {
+			copy[k] = copyMap(subMap)
+		} else {
+			copy[k] = v
+		}
+	}
+	return copy
+}
+
+// Deep merge: dst gets merged with src, with nested maps merged recursively
+func deepMerge(dst, src map[string]interface{}) map[string]interface{} {
+	for k, v := range src {
+		if vMap, ok := v.(map[string]interface{}); ok {
+			if dv, exists := dst[k]; exists {
+				if dvMap, ok := dv.(map[string]interface{}); ok {
+					dst[k] = deepMerge(dvMap, vMap)
+					continue
+				}
+			}
+		}
+		dst[k] = v
+	}
+	return dst
+}
+
+
+
+
+
+//func handleMultiListItems(translatedInput map[string]interface{}, jsonKey, translationKey string, loopedValue string) map[string]interface{} { 
+
+// This function wouldn't be necessary if other recursion functions
+// also have this capability themselves
+
+// translatedInput = the parent object to modify. It is actually the parent of the parents' object.
+// jsonKey = the key in the parent object WHICH IS A LIST
+// parsedValues = the child values from where we have the list
+func handleMultiListItems(translatedInput []interface{}, parentKey string, parsedValues map[string]interface{}) ([]interface{}) { 
+	log.Printf("RECURSE: %s!! Key: %#v", parentKey, parsedValues)
+	if !strings.Contains(parentKey, ".") && len(translatedInput) == 0 {
+		translatedInput = append(translatedInput, parsedValues)
+	}
+
+	// Start recursing to find the valid keys
+	// Checks: 
+	// list -> subsub
+	// maps -> childkeys
+	// strings -> build it out.
+	for childKey, v := range parsedValues {
+		if val, ok := v.(map[string]interface{}); ok {
+			log.Printf("Map: %s", childKey)
+
+			// By passing in translatedInput we allow child objects to modify the parent?
+			newKey := fmt.Sprintf("%s.%s", parentKey, childKey)
+			translatedInput = handleMultiListItems(translatedInput, newKey, val) 
+
+		} else if _, ok := v.([]interface{}); ok {
+			log.Printf("List: %s (UNHANDLED)", childKey)
+		} else if val, ok := v.(string); ok {
+			log.Printf("string: %s", childKey)
+			if strings.Contains(val, "schemaless_list[") {
+				log.Printf("SCHEMALESS LIST FOUND")
+
+				foundList := strings.Split(val, "schemaless_list")
+				if len(foundList) >= 2 {
+					unmarshalledList := []string{}
+					err := json.Unmarshal([]byte(foundList[1]), &unmarshalledList)
+					if err != nil {
+						log.Printf("[ERROR] Schemaless problem in string unmarshal of %s: err", foundList[1], err)
+					}
+
+					log.Printf("Keys: %d", len(unmarshalledList))
+					if len(translatedInput) < len(unmarshalledList) {
+
+						// Reference Item
+						firstItem := translatedInput[0]
+						for cnt, listValue := range unmarshalledList {
+							if cnt >= len(translatedInput) {
+								translatedInput = append(translatedInput, firstItem)
+							}
+
+							// Update the translatedInput with the new value
+							newKey := fmt.Sprintf("%s.%s", parentKey, childKey)
+							// Remove the first key
+							newKey = strings.SplitN(newKey, ".", 2)[1]
+							translatedInput[cnt] = setNestedMap(translatedInput[cnt].(map[string]interface{}), newKey, listValue)
+
+							log.Printf("\n\nCNT: %d, NewKey: %s, ListValue: %s\n\n", cnt, newKey, listValue)
+						}
+					}
+				}
+			}
+		} else {
+			log.Printf("OTHER: %s (UNHANDLED)", childKey)
+			//setNestedMap(translatedInput[cnt].(map[string]interface{}), newKey, listValue)
+		}
+	}
+
+	log.Printf("TRANSLATEDINPUT: %#v", translatedInput)
+	return translatedInput
 }
 
 func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[string]interface{}) ([]byte, []byte, error) {
@@ -850,11 +990,11 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 	// Creating a new map to store the translated values
 	translatedInput := make(map[string]interface{})
 	for translationKey, translationValue := range translation {
+		log.Printf("[DEBUG] Schemaless: Translating key '%s' with value '%v'. ", translationKey, translationValue)
 
 		// Find the field in the parsedInput
 		found := false
 		for inputKey, inputValue:= range parsedInput {
-			_ = inputValue
 			if inputKey != translationValue {
 				continue
 			}
@@ -875,6 +1015,71 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 				}
 
 				translatedInput[translationKey] = translationValue
+			} else if val, ok := translationValue.([]interface{}); ok {
+
+				newOutput := []interface{}{}
+
+				// The list part here doesn't really work as this is checking the length of the list in the STANDARD - NOT in the value from the user
+				// This makes it so that the append really does... nothing 
+				for _, v := range val {
+					if v, ok := v.(map[string]interface{}); !ok {
+						log.Printf("[ERROR] Schemaless: Parsed input value is not a map[string]interface{} for key '%s': %v. Type: %#v", translationKey, v, reflect.TypeOf(v))
+						newOutput = append(newOutput, v)
+						continue
+					}
+
+					// If the value is a map[string]interface{}, we need to recurse it
+					newValue := make(map[string]interface{})
+					marshalled, err := json.Marshal(v)
+					if err != nil {
+						log.Printf("[ERROR] Schemaless: Error marshalling value for key '%s': %v", translationKey, err)
+						continue
+					}
+
+					err = json.Unmarshal(marshalled, &newValue)
+					if err != nil {
+						log.Printf("[ERROR] Schemaless: Error unmarshalling value for key '%s': %v", translationKey, err)
+						continue
+					}
+
+					output, _, err := runJsonTranslation(ctx, inputValue, newValue)
+					if err != nil {
+						log.Printf("[ERROR] Schemaless: Error in runJsonTranslation for key '%s': %v", translationKey, err)
+						continue
+					}
+
+					// Marshal the output back to a byte
+					var outputParsed map[string]interface{}
+					err = json.Unmarshal(output, &outputParsed)
+					if err != nil {
+						log.Printf("[ERROR] Schemaless: Error in unmarshalling output for key '%s': %v", translationKey, err)
+						
+						translatedInput[translationKey] = translationValue
+						continue
+					}
+
+					newOutput = append(newOutput, outputParsed)
+
+					// Hard to optimise for subkeys -> parent control tho
+					if strings.Contains(string(output), "schemaless_list[") {
+						log.Printf("WHAT IS THE KEY HERE? %#v. Output: %s", translationKey, output)
+						newTranslatedInput := handleMultiListItems(newOutput, translationKey, outputParsed)
+						translationValue = newTranslatedInput
+
+						newOutput = []interface{}{}
+						//newOutput = append(newOutput, newTranslatedInput)
+						break
+					}
+				}
+
+				if len(newOutput) > 0 {
+					
+					translatedInput[translationKey] = newOutput
+				} else {
+					log.Printf("[ERROR] Schemaless: No output found for key '%s' after translation. Keeping original value.", translationKey)
+					translatedInput[translationKey] = translationValue
+				}
+
 			} else if val, ok := translationValue.(map[string]interface{}); ok {
 
 				// Recurse it with the same function again
@@ -923,7 +1128,7 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 					recursed, err := recurseFindKey(parsedInput, key, 0)
 					if err != nil {
 						if debug { 
-							log.Printf("[DEBUG] Schemaless Reverse problem: Error in recurseFindKey for %#v: %v", key, err)
+							log.Printf("[DEBUG] Schemaless Reverse problem: Error in RecurseFindKey for %#v: %v", key, err)
 						}
 					}
 
@@ -1139,7 +1344,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 	}
 
 	// Doesn't handle list inputs in json
-	startValue := string(inputValue)
+	startValue := strings.TrimSpace(string(inputValue))
 	if !strings.HasPrefix(startValue, "{") || !strings.HasSuffix(startValue, "}") { 
 		output, err := YamlConvert(startValue)
 		if err != nil {
