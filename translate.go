@@ -860,7 +860,17 @@ func setNestedMap(m map[string]interface{}, path string, value interface{}) map[
 	// Build the nested value to merge
 	nested := value
 	for i := len(keys) - 1; i >= 0; i-- {
-		nested = map[string]interface{}{keys[i]: nested}
+		if keys[i] == "#" {
+			//nested = []interface{}{nested}
+			//nested = map[string]interface{}{
+			//	keys[i]: nested,
+			//}
+			continue
+		} 
+
+		nested = map[string]interface{}{
+			keys[i]: nested,
+		}
 	}
 
 	// Deep merge into the existing map
@@ -891,13 +901,11 @@ func deepMerge(dst, src map[string]interface{}) map[string]interface{} {
 				}
 			}
 		}
+
 		dst[k] = v
 	}
 	return dst
 }
-
-
-
 
 
 //func handleMultiListItems(translatedInput map[string]interface{}, jsonKey, translationKey string, loopedValue string) map[string]interface{} { 
@@ -908,8 +916,7 @@ func deepMerge(dst, src map[string]interface{}) map[string]interface{} {
 // translatedInput = the parent object to modify. It is actually the parent of the parents' object.
 // jsonKey = the key in the parent object WHICH IS A LIST
 // parsedValues = the child values from where we have the list
-func handleMultiListItems(translatedInput []interface{}, parentKey string, parsedValues map[string]interface{}) ([]interface{}) { 
-	log.Printf("RECURSE: %s!! Key: %#v", parentKey, parsedValues)
+func handleMultiListItems(translatedInput []interface{}, parentKey string, parsedValues map[string]interface{}, listDepth int) ([]interface{}) { 
 	if !strings.Contains(parentKey, ".") && len(translatedInput) == 0 {
 		translatedInput = append(translatedInput, parsedValues)
 	}
@@ -921,45 +928,113 @@ func handleMultiListItems(translatedInput []interface{}, parentKey string, parse
 	// strings -> build it out.
 	for childKey, v := range parsedValues {
 		if val, ok := v.(map[string]interface{}); ok {
-			log.Printf("Map: %s", childKey)
+			log.Printf("PARENT Map: %s", childKey)
 
 			// By passing in translatedInput we allow child objects to modify the parent?
 			newKey := fmt.Sprintf("%s.%s", parentKey, childKey)
-			translatedInput = handleMultiListItems(translatedInput, newKey, val) 
+			translatedInput = handleMultiListItems(translatedInput, newKey, val, listDepth) 
 
-		} else if _, ok := v.([]interface{}); ok {
-			log.Printf("List: %s (UNHANDLED)", childKey)
+		} else if val, ok := v.([]interface{}); ok {
+			log.Printf("\n\nPARENT LIST: %s\n\n", childKey)
+
+			newKey := fmt.Sprintf("%s.%s.#", parentKey, childKey)
+
+			// TranslatedInput: handles the OUTER layer properly
+			// val: handles the INNER layer properly
+			// Problem: Both are wrong
+			for _, subItem := range val {
+
+				translatedInput = handleMultiListItems(translatedInput, newKey, subItem.(map[string]interface{}), listDepth+1)
+
+				//val := handleMultiListItems(val, "newKey", subItem.(map[string]interface{}))
+				//log.Printf("New val KEY: %#v (%d): %#v", newKey, cnt, val)
+			}
+
+
 		} else if val, ok := v.(string); ok {
-			log.Printf("string: %s", childKey)
 			if strings.Contains(val, "schemaless_list[") {
-				log.Printf("SCHEMALESS LIST FOUND: %s", val)
 
 				foundList := strings.Split(val, "schemaless_list")
 				if len(foundList) >= 2 {
+
+					// Somehow ALWAYS look for the first INNER list
+					// This makes it so that extrapolation can be done well across all fields everywhere
+
+					matchingList := strings.Join(foundList[1:], "schemaless_list")
 					unmarshalledList := []string{}
-					err := json.Unmarshal([]byte(foundList[1]), &unmarshalledList)
+					err := json.Unmarshal([]byte(matchingList), &unmarshalledList)
 					if err != nil {
-						log.Printf("[ERROR] Schemaless problem in string unmarshal of %s: err", foundList[1], err)
+						log.Printf("[ERROR] Schemaless problem in string unmarshal of %s: err", matchingList, err)
 					}
 
-					log.Printf("Keys: %d", len(unmarshalledList))
+					oldParentKey := parentKey
+					newParentKey := ""
+					modificationList := translatedInput
+					if listDepth > 0 {
+						log.Printf("\n\n\n\n\nHandle listdepth '%d' from key %s\n\n\n\n", listDepth, parentKey)
+
+						parentKeySplit := strings.Split(parentKey, ".")
+
+						counter := 0
+						newKeySplit := []string{}
+						for cnt, part := range parentKeySplit {
+							if part == "#" {
+								counter += 1
+
+								if cnt > 0 { 
+									newKeySplit = append(newKeySplit, parentKeySplit[cnt-1])
+								}
+							}
+
+							if counter-1 == listDepth {
+								newKeySplit = append(newKeySplit, part) 
+							}
+						}
+
+						newParentKey = strings.Join(newKeySplit, ".")
+						parentKey = newParentKey
+						modificationList = []interface{}{
+							parsedValues,
+						}
+
+					}
 
 					// Reference Item
-					firstItem := translatedInput[0]
+					firstItem := modificationList[0]
+
+					log.Printf("REF ITEM: %#v", firstItem)
+
 					for cnt, listValue := range unmarshalledList {
-						if cnt >= len(translatedInput) {
-							translatedInput = append(translatedInput, firstItem)
+						if cnt >= len(modificationList) {
+							modificationList = append(modificationList, firstItem)
 						}
+
 
 						// Update the translatedInput with the new value
 						newKey := fmt.Sprintf("%s.%s", parentKey, childKey)
-						// Remove the first key
 						newKey = strings.SplitN(newKey, ".", 2)[1]
-						translatedInput[cnt] = setNestedMap(translatedInput[cnt].(map[string]interface{}), newKey, listValue)
 
-						log.Printf("\n\nCNT: %d, NewKey: %s, ListValue: %s\n\n", cnt, newKey, listValue)
+						cntItem := modificationList[cnt].(map[string]interface{})
+						log.Printf("New value (%d - %#v): %#v inside %#v", cnt, parentKey, listValue, cntItem)
+						modificationList[cnt] = setNestedMap(cntItem, newKey, listValue)
 					}
+
+					if listDepth > 0 { 
+						log.Printf("KEY TO PUT IN: %#v.", oldParentKey)
+
+						// FIXME: Problem here is it could be multiple recursion parents.
+						// And it needs to automatically find the right one
+						translatedInput[0] = setNestedMap(translatedInput[0].(map[string]interface{}), oldParentKey, modificationList)
+					}
+
+					marshalled, _ := json.MarshalIndent(translatedInput, "", "\t")
+					log.Printf("MARSHALLED (%d): %s", listDepth, string(marshalled))
+
+					//translatedInput = modificationList
+
 				}
+			} else {
+				log.Printf("[ERROR] Schemaless: String value '%s' found in key '%s', but not a schemaless_list. This is not handled yet.", val, childKey)
 			}
 		} else {
 			log.Printf("OTHER: %s (UNHANDLED)", childKey)
@@ -1059,7 +1134,8 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 
 					// Hard to optimise for subkeys -> parent control tho
 					if strings.Contains(string(output), "schemaless_list[") {
-						newTranslatedInput := handleMultiListItems(newOutput, translationKey, outputParsed)
+						//newTranslatedInput := handleMultiListItems(newOutput, translationKey, outputParsed)
+						newTranslatedInput := handleMultiListItems(newOutput, "#", outputParsed, 0)
 						translationValue = newTranslatedInput
 
 						newOutput = []interface{}{}
