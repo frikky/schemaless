@@ -838,7 +838,11 @@ func recurseFindKey(input map[string]interface{}, key string, depth int) (string
 				// list. This is required 
 				
 				// If we get them recursed with .#.# 
-				return "schemaless_list"+string(marshalled), nil
+				if len(marshalled) > 2 {
+					return "schemaless_list"+string(marshalled), nil
+				} else {
+					return "", nil
+				}
 			} else {
 				log.Printf("[WARNING] Schemaless reverse (8): Invalid key '%s' (%#v) found in list: %v. Should be something like '#0' or '#.key'. Not checking the list.", parsedKey, keys, string(marshalledMap))
 			}
