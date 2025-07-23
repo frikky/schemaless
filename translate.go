@@ -957,7 +957,7 @@ func handleMultiListItems(translatedInput []interface{}, parentKey string, parse
 				if parsedSubitem, ok := subItem.(map[string]interface{}); ok { 
 					translatedInput = handleMultiListItems(translatedInput, newKey, parsedSubitem, listDepth+1, cnt)
 				} else {
-					log.Printf("[ERROR] Schemaless: List item '%s' in key '%s' is not a map[string]interface{}, but %T. This is not handled yet.", childKey, parentKey, subItem)
+					log.Printf("[ERROR] Schemaless: List item '%s' in key '%s' is not a map[string]interface{}, but %T. This is not handled yet (1).", childKey, parentKey, subItem)
 				}
 			}
 
@@ -1009,7 +1009,7 @@ func handleMultiListItems(translatedInput []interface{}, parentKey string, parse
 
 					}
 
-					// Reference Item
+					// Reference Item in the child list
 					firstItem := modificationList[0]
 					var found bool
 					for cnt, listValue := range unmarshalledList {
@@ -1027,7 +1027,11 @@ func handleMultiListItems(translatedInput []interface{}, parentKey string, parse
 						//	log.Printf("Setting value %#v for key '%s' in modificationList[%d]", listValue, newKey, cnt)
 						//}
 
-						modificationList[cnt], found = setNestedMap(modificationList[cnt].(map[string]interface{}), newKey, listValue)
+						log.Printf("Listvalue to put in index '%d': %#v", childIndex, listValue)
+						newModList := modificationList[cnt].(map[string]interface{})
+
+						newModList, found = setNestedMap(newModList, newKey, listValue)
+						modificationList[cnt] = newModList
 						if !found {
 							if debug { 
 								log.Printf("[ERROR] Schemaless: Could not set nested map for key '%s' with value '%s'. Count: %#v", newKey, listValue, cnt)
@@ -1038,41 +1042,71 @@ func handleMultiListItems(translatedInput []interface{}, parentKey string, parse
 					if listDepth > 0 { 
 						// Updates the child & here 
 						// This shit also needs recursion.. gahh
-
 						if debug { 
-							log.Printf("Updating CHILD LOOP INDEX %#v", childIndex)
+							log.Printf("UPDATING CHILD LOOP INDEX %#v", childIndex)
 						}
 
-						parsedValues = modificationList[childIndex].(map[string]interface{})
 
 						// And it needs to automatically find the right one
 						if strings.HasPrefix(oldParentKey, ".") {
 							oldParentKey = strings.Trim(oldParentKey, ".")
 						}
-						//oldParentKey = fmt.Sprintf("cve.cvssloop.#")
 
 						if debug { 
-							log.Printf("[DEBUG] Potential LOOP problem: KEY TO PUT IN: %#v. Value: %s", oldParentKey, modificationList)
+							log.Printf("[DEBUG] Potential LOOP issue: KEY TO PUT IN: %#v. '%#v' -> %#v", oldParentKey, parsedValues, modificationList)
 						}
 
+						updated := false
 						for inputKey, _ := range translatedInput {
-							translatedInput[inputKey], found = setNestedMap(translatedInput[inputKey].(map[string]interface{}), oldParentKey, modificationList)
-							if found {
-								break
+							//FIXME: Need to NOT update the index unless there is a schemaless_list[] in the key in question
+							newMap := translatedInput[inputKey].(map[string]interface{})
+
+							// This part makes it show the first one ONLY for some reason
+							// Without it, it shows ONLY the last one...
+
+							// FIXME: Re-add this for outer looping. Gotta fix inner now.
+							marshalledMap, err := json.Marshal(newMap)
+							if err == nil {
+								comparisonString := fmt.Sprintf(`"%s":"schemaless_list[`, childKey)
+								if !strings.Contains(string(marshalledMap), comparisonString) {
+									log.Printf("HANDLED ALREADY: %#v", string(marshalledMap))
+									continue
+								}
 							}
+
+							newMap, _ = setNestedMap(newMap, oldParentKey, modificationList)
+							translatedInput[inputKey] = newMap
+							updated = true
+
+							//parsedValues = newMap
+
+							break
 						}
+
+						if !updated {
+							if debug { 
+								log.Printf("[DEBUG] Appended new index to parent list as it wasn't found, but needed.")
+							}
+
+							translatedInput = append(translatedInput, map[string]interface{}{})
+							newMap := translatedInput[len(translatedInput)-1].(map[string]interface{})
+							newMap, found = setNestedMap(newMap, oldParentKey, modificationList)
+							translatedInput[len(translatedInput)-1] = newMap
+						}
+
+						parsedValues = modificationList[childIndex].(map[string]interface{})
+
 					} else {
 						translatedInput = modificationList
 					}
 
-					//marshalled, _ := json.MarshalIndent(translatedInput, "", "\t")
-					//log.Printf("MARSHALLED (%d): %s.", listDepth, string(marshalled))
-
+					marshalled, _ := json.MarshalIndent(translatedInput, "", "\t")
+					log.Printf("MARSHALLED (%d): %s.", listDepth, string(marshalled))
 					//translatedInput = modificationList
 
 				}
 			} else {
-				log.Printf("[ERROR] Schemaless: String value '%s' found in key '%s', but not a schemaless_list. This is not handled yet.", val, childKey)
+				log.Printf("[ERROR] Schemaless: String value '%s' found in key '%s', but not a schemaless_list. This is not handled yet (2).", val, childKey)
 			}
 		} else {
 			log.Printf("OTHER: %s (UNHANDLED)", childKey)
@@ -1130,11 +1164,38 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 				// The list part here doesn't really work as this is checking the length of the list in the STANDARD - NOT in the value from the user
 				// This makes it so that the append really does... nothing 
 				for _, v := range val {
-					if v, ok := v.(map[string]interface{}); !ok {
-						log.Printf("[ERROR] Schemaless: Parsed input value is not a map[string]interface{} for key '%s': %v. Type: %#v", translationKey, v, reflect.TypeOf(v))
-						newOutput = append(newOutput, v)
-						continue
+					if _, ok := v.(map[string]interface{}); !ok {
+
+						if stringVal, stringValOk := v.(string); stringValOk {
+							stringKey := stringVal
+							if strings.Contains(stringKey, "[]") {
+							stringKey = strings.ReplaceAll(stringKey, "[]", ".#")
+							}
+
+							if strings.Contains(stringKey, `"`) {
+								stringKey = strings.ReplaceAll(stringKey, `"`, "")
+							}
+
+							recursed, err := recurseFindKey(parsedInput, stringKey, 0)
+							if err == nil { 
+								translationValue = []string{recursed}
+							}  else {
+								log.Printf("[ERROR] Schemaless: Error in RecurseFindKey for key string '%s': %v", translationKey, err)
+								translationValue = []string{}
+
+								//modifiedParsedInput[translationKey] = []string{}
+								//translatedInput[translationKey] = []string{}
+							}
+
+							continue
+						} else {
+							log.Printf("[ERROR] Schemaless: Parsed input value is not a map[string]interface{} for key '%s': %v. Type: %#v", translationKey, v, reflect.TypeOf(v))
+							newOutput = append(newOutput, v)
+							continue
+						}
 					}
+
+					v = v.(map[string]interface{})
 
 					// If the value is a map[string]interface{}, we need to recurse it
 					newValue := make(map[string]interface{})
@@ -1150,6 +1211,7 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 						continue
 					}
 
+					// Runs an actual translation
 					output, _, err := runJsonTranslation(ctx, inputValue, newValue)
 					if err != nil {
 						log.Printf("[ERROR] Schemaless: Error in runJsonTranslation for key '%s': %v", translationKey, err)
