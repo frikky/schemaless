@@ -1,4 +1,4 @@
-package schemaless
+package schemaless 
 
 /*
 A package for translating from a JSON input to a standard format using OpenAI's GPT-4 API.
@@ -115,6 +115,8 @@ FORMATTING RULES
 - Add a dollar sign in front of every translation: $key.subkey.subsubkey. 
 - If the type is Integer or Number, make it an actual number - NOT a string with a number in it.
 - If the type is an Array, make it an actual JSON array with all the relevant keys. Example: Array type 'firstname & lastname' becomes [{"firstname": "$data[].firstname", "lastname": "$data[].lastname"}]
+- NEVER use large properties or data directly, even to map custom fields or custom attributes. E.g. $data or $data.fields is not ok. Always go as deep as possible to the specific value, such as $data.fields.id or $data.fields.customfield[1].name.
+- Replace SPACE in keys with underscore
 
 END FORMATTING RULES
 `, additionalCondition)
@@ -309,8 +311,13 @@ func TranslateBadFieldFormats(fields []Valuereplace, skipLiquid ...bool) []Value
 	for fieldIndex, _ := range fields {
 		field := fields[fieldIndex]
 
-		// Used for testing
-		re := regexp.MustCompile(`{{\s*([a-zA-Z0-9_\.]+)(\[[0-9]*\])?(\.[a-zA-Z0-9_]+)?\s*}}`)
+		// Injecting it. Weird clause, but helps with parsing lists and the like.
+		if strings.HasPrefix(field.Value, "$") && !strings.HasPrefix(field.Value, "{{") && !strings.HasSuffix(field.Value, "}}") {
+			field.Value = fmt.Sprintf("{{%s}}", field.Value)
+		}
+
+		// Used for parsing bad outputs 
+		re := regexp.MustCompile(`{{\$?\s*([a-zA-Z0-9_\.()]+)(\[[0-9]*\])?(\.[a-zA-Z0-9_()]+)?\s*}}`)
 		if skipLiquidCheck {
 			//re = regexp.MustCompile(`\s*([a-zA-Z0-9_\.]+)(\[[0-9]*\])?(\.[a-zA-Z0-9_]+)?\s*`)
 		}
@@ -1419,8 +1426,12 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 	}
 
 	// FIXME: Re-enable for simplicity
-	if keepOriginalMapped { 
-		translatedInput["unmapped"] = parsedInput
+	if !debug { 
+		if keepOriginalMapped { 
+			translatedInput["unmapped"] = parsedInput
+		}
+	} else {
+		log.Printf("[DEBUG] Skipping unmapped for debug simplicity.")
 	}
 
 	for translationKey, translationValue := range translation {
@@ -1603,6 +1614,10 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 					} else {
 						log.Printf("[ERROR] Schemaless: Unexpected number of fields after TranslateBadFieldFormats for key '%s': %d", translationKey, len(fields))
 					}
+
+					if debug { 
+						log.Printf("[DEBUG] VAL: %#v", val)
+					}
 				}
 
 				if strings.Contains(val, ".") || strings.Contains(val, "$") {
@@ -1621,16 +1636,21 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 						newOutput := val
 
 						// From app sdk => Same format.
-						matchPattern := `([$]{1}([a-zA-Z0-9_@-]+\.?){1}([a-zA-Z0-9#_@-]+\.?){0,})`
+						matchPattern := `([$]{1}([a-zA-Z0-9_@()-]+\.?){1}([a-zA-Z0-9#_@\()-]+\.?){0,})`
 						// Find all occurrences
 						re := regexp.MustCompile(matchPattern)
 						matches := re.FindAllString(val, -1)
 						for _, match := range matches {
+							if debug { 
+								log.Printf("[DEBUG] MATCH: %#v", match)
+							}
+
 							newParsedMatch := getParsedMatch(match)
 							recursed, err := recurseFindKey(parsedInput, newParsedMatch, 0)
 							if err != nil {
 								log.Printf("[ERROR] Schemaless: Error in RecurseFindKey for match %#v: %v", match, err)
 							}
+
 
 							newOutput = strings.ReplaceAll(newOutput, match, recursed)
 							if strings.Contains(match, ".#") {
@@ -1651,6 +1671,7 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 
 						translatedInput[translationKey] = recursed
 					}
+
 				} else {
 					translatedInput[translationKey] = val
 				}
@@ -1658,6 +1679,55 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 				log.Printf("[ERROR] Schemaless: Field %#v not found in input", translationValue)
 
 				translatedInput[translationKey] = translationValue
+			}
+
+			// This is to do some custom parsing that makes 
+			// schemaless["value1"] into the actual parent
+			// Unsure if this breaks loop-in-loop or not (it may)
+			if newVal, err := translatedInput[translationKey].(string); err {
+				if strings.HasPrefix(newVal, "{{") && strings.HasSuffix(newVal, "}}") {
+					newVal = strings.TrimPrefix(newVal, "{{")
+					newVal = strings.TrimSuffix(newVal, "}}")
+				}
+
+				if strings.Contains(newVal, "schemaless_list[") && strings.HasSuffix(newVal, "]") {
+					// Try to marshal it into a []string list
+					newVal = strings.TrimPrefix(newVal, "schemaless_list")
+					parsedList := []string{}
+					err := json.Unmarshal([]byte(newVal), &parsedList)
+					if err != nil {
+						log.Printf("[ERROR] Schemaless: Error in unmarshalling schemaless_list for key '%s': %v", translationKey, err)
+					} else {
+						foundValue := ""
+						for _, item := range parsedList {
+							if len(item) == 0 {
+								continue
+							}
+
+							foundValue = item
+
+							// FIXME: Should not break until correct index is found
+							// e.g. $items[3].value -> return the value for the correct index, not the first one in the list
+							if len(foundValue) > 0 {
+								break
+							}
+						}
+
+						if len(foundValue) == 0 {
+							translatedInput[translationKey] = "" 
+						} else {
+							translatedInput[translationKey] = foundValue 
+						}
+					}
+				} else {
+					if debug { 
+						log.Printf("[ERROR] Schemaless: Value for key '%s' is a string but does not contain schemaless_list: %s", translationKey, newVal)
+					}
+				}
+			} else {
+				if debug {
+					log.Printf("[DEBUG] Schemaless: Value for key '%s' is not a string, skipping schemaless_list parsing. Value: %#v", translationKey, translatedInput[translationKey])
+				}
 			}
 		}
 	}
@@ -2025,22 +2095,21 @@ func init() {
 	}
 }
 
-//func main() {
-//
-//	/*
-//	startValue := `Services:
-//-   Orders:
-//    -   ID: $save ID1
-//        SupplierOrderCode: $SupplierOrderCode
-//    -   ID: $save ID2
-//        SupplierOrderCode: 111111`
-//	*/
-//
-//	//startValue := `{"title": {"key1":"value1", "key2": 2, "key3": true, "key4": null}, "key1":"value1", "key2": 2, "key3": true, "key4": null,  "key6": [{"key1":"value1", "key2": 2, "key3": true, "key4": null}, "hello", 1, true]}`
-//	startValue := []byte(`{"title": "Here is a message for you", "description": "What is this?", "severity": "High", "status": "Open", "time_taken": "125", "id": "1234"}`)
-//
-//	allStandards := []string{"ticket"}
-//
-//	ctx := context.Background()
-//	Translate(ctx, allStandards[0], startValue)
-//}
+func main() {
+
+	/*
+	startValue := `Services:
+-   Orders:
+    -   ID: $save ID1
+        SupplierOrderCode: $SupplierOrderCode
+    -   ID: $save ID2
+        SupplierOrderCode: 111111`
+	*/
+
+	startValue := []byte(`{"properties": {"Name":{"id":"title","type":"title","title":[{"type":"text","text":{"content":"Everllence SE","link":null},"annotations":{"bold":false,"italic":false,"strikethrough":false,"underline":false,"code":false,"color":"default"},"plain_text":"Everllence SE","href":null}]}},"url":"https://www.notion.so/Everllence-SE-2ffa4982a6e780f09795eb7a379710dc","public_url":null}`)
+	allStandards := []string{"ticket"}
+
+	ctx := context.Background()
+	output, err := Translate(ctx, allStandards[0], startValue)
+	log.Printf("OUTPUT: %s, Err: %#v", string(output), err)
+}
