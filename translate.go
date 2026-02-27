@@ -308,22 +308,27 @@ func TranslateBadFieldFormats(fields []Valuereplace, skipLiquid ...bool) []Value
 		skipLiquidCheck = true
 	}
 
+	regexMatch := `\$?\s*([a-zA-Z0-9_\.()]+)(\[[0-9]*\])?(\.[a-zA-Z0-9_()]+)(\[[0-9]*\])?\s*`
 	for fieldIndex, _ := range fields {
 		field := fields[fieldIndex]
 
 		// Injecting it. Weird clause, but helps with parsing lists and the like.
-		if strings.HasPrefix(field.Value, "$") && !strings.HasPrefix(field.Value, "{{") && !strings.HasSuffix(field.Value, "}}") {
-			field.Value = fmt.Sprintf("{{%s}}", field.Value)
-		}
+		oldValue := field.Value
+		//if strings.HasPrefix(field.Value, "$") && !strings.HasPrefix(field.Value, "{{") && !strings.HasSuffix(field.Value, "}}") {
+		//	field.Value = fmt.Sprintf("{{%s}}", field.Value)
+		//}
 
 		// Used for parsing bad outputs 
-		re := regexp.MustCompile(`{{\$?\s*([a-zA-Z0-9_\.()]+)(\[[0-9]*\])?(\.[a-zA-Z0-9_()]+)?\s*}}`)
+		re := regexp.MustCompile(fmt.Sprintf(`{{%s}}`, regexMatch))
 		if skipLiquidCheck {
-			//re = regexp.MustCompile(`\s*([a-zA-Z0-9_\.]+)(\[[0-9]*\])?(\.[a-zA-Z0-9_]+)?\s*`)
+			re = regexp.MustCompile(regexMatch)
 		}
 
 		matches := re.FindAllStringSubmatch(field.Value, -1)
+		log.Printf("MATCHES: %#v", matches)
 		if len(matches) == 0 {
+			field.Value = oldValue
+
 			if strings.HasPrefix(field.Value, "$.") {
 				field.Value = strings.ReplaceAll(field.Value, "$.", "$")
 			} else {
