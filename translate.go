@@ -325,7 +325,6 @@ func TranslateBadFieldFormats(fields []Valuereplace, skipLiquid ...bool) []Value
 		}
 
 		matches := re.FindAllStringSubmatch(field.Value, -1)
-		log.Printf("MATCHES: %#v", matches)
 		if len(matches) == 0 {
 			field.Value = oldValue
 
@@ -1431,6 +1430,10 @@ func runJsonTranslation(ctx context.Context, inputValue []byte, translation map[
 	}
 
 	// FIXME: Re-enable for simplicity
+	if keepOriginalMapped { 
+		translatedInput["unmapped"] = parsedInput
+	}
+
 	if !debug { 
 		if keepOriginalMapped { 
 			translatedInput["unmapped"] = parsedInput
@@ -1840,10 +1843,11 @@ func handleSubStandard(ctx context.Context, subStandard string, returnJson strin
 			}
 
 			parsedOutput = append(parsedOutput, schemalessOutput)
+			time.Sleep(2 * time.Second) // Sleep for a bit to allow caching to be done properly before goroutining the rest
 			continue
 		}
 
-		wg.Add(1) // Increment the wait group counter for each goroutine
+		wg.Add(1) 
 		go func(cnt int, listItem interface{}) {
 			defer wg.Done() // Decrement the wait group counter when the goroutine completes
 
@@ -1869,6 +1873,8 @@ func handleSubStandard(ctx context.Context, subStandard string, returnJson strin
 			log.Printf("[WARNING] Schemaless: Breaking after %d items in the list", skipAfterCount)
 			break
 		}
+
+		time.Sleep(100 * time.Millisecond) // Sleep for a bit to prevent overwhelming the system with too many goroutines at once (also fixes caching)
 	}
 
 	wg.Wait() // Wait for all goroutines to finish
