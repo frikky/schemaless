@@ -313,6 +313,10 @@ func TranslateBadFieldFormats(fields []Valuereplace, skipLiquid ...bool) []Value
 		field := fields[fieldIndex]
 
 		// Injecting it. Weird clause, but helps with parsing lists and the like.
+		if strings.HasPrefix(field.Value, "$.") {
+			field.Value = strings.ReplaceAll(field.Value, "$.", "$")
+		}
+
 		oldValue := field.Value
 		//if strings.HasPrefix(field.Value, "$") && !strings.HasPrefix(field.Value, "{{") && !strings.HasSuffix(field.Value, "}}") {
 		//	field.Value = fmt.Sprintf("{{%s}}", field.Value)
