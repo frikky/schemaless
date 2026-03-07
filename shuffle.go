@@ -366,12 +366,20 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		return []byte{}, errors.New("Shuffle URL not set")
 	}
 
+
 	// 1. Get the category 
 	// 2. Find the file in the category output
 	// 3. Read the file data
 	// 4. Return it
 	client := GetExternalClient(shuffleConfig.URL)
-	categoryUrl := fmt.Sprintf("%s/api/v1/files/namespaces/%s?ids=true&filename=%s", shuffleConfig.URL, category, name)
+
+	// Specifically for handling default standards we deal with all the time
+	newName := name
+	if category == "translation_standards" && strings.HasPrefix(newName, "get_") {
+		newName = strings.TrimPrefix(newName, "get_")
+	}
+
+	categoryUrl := fmt.Sprintf("%s/api/v1/files/namespaces/%s?ids=true&filename=%s", shuffleConfig.URL, category, newName)
 
 	hasher := md5.New()
 	hasher.Write([]byte(categoryUrl+shuffleConfig.Authorization+shuffleConfig.OrgId+shuffleConfig.ExecutionId))
@@ -387,7 +395,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		//return cacheData, nil
 	} else {
 		if debug { 
-			log.Printf("[DEBUG] Schemaless: Finding file %#v in category %#v from Shuffle backend", name, category)
+			log.Printf("[DEBUG] Schemaless: Finding file %#v in category %#v from Shuffle backend", newName, category)
 		}
 
 		if len(shuffleConfig.ExecutionId) > 0 {
@@ -450,9 +458,9 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		return []byte{}, err
 	}
 
-	name = strings.TrimSpace(strings.ToLower(strings.Replace(name, " ", "_", -1)))
-	if strings.HasSuffix(name, ".json") {
-		name = name[:len(name)-5]
+	newName = strings.TrimSpace(strings.ToLower(strings.Replace(newName, " ", "_", -1)))
+	if strings.HasSuffix(newName, ".json") {
+		newName = newName[:len(name)-5]
 	}
 
 
@@ -467,24 +475,24 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		}
 
 		//if strings.Contains(filename, name) {
-		if filename != name { 
+		if filename != newName { 
 			continue
 		}
 
 		downloadedFile, err := GetShuffleFileById(file.Id, shuffleConfig)
 		if err != nil {
-			log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", name, err)
+			log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", newName, err)
 			return []byte{}, err
 		}
 
 		//if debug { 
-		//	log.Printf("[DEBUG] Schemaless: Found file '%s' in category '%s' with ID '%s'", name, category, file.Id)
+		//	log.Printf("[DEBUG] Schemaless: Found file '%s' in category '%s' with ID '%s'", newName, category, file.Id)
 		//}
 
 		return downloadedFile, nil
 	}
 
-	return []byte{}, errors.New(fmt.Sprintf("Failed to find translation file matching name '%s' in category '%s'", name, category)) 
+	return []byte{}, errors.New(fmt.Sprintf("Failed to find translation file matching name '%s' in category '%s'", newName, category)) 
 }
 
 // Cache handlers

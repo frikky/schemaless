@@ -108,23 +108,23 @@ END PARSING RULES
 ----------
 FORMATTING RULES 
 
-- jq formatting for loops is ok
-- Keep the same structure as the standard format. Don't remove fields.
+- Keep the same structure as the standard format. Do not remove fields.
 - If it makes sense, you can add multiple variables in the middle of descriptive text such as 'The ticket $data.id with title $data.title has been created'
 - If it is a value OR tells you exactly what the value is, just keep the value. No dollarsign or wrapping.
 - Add a dollar sign in front of every translation: $key.subkey.subsubkey. 
 - If the type is Integer or Number, make it an actual number - NOT a string with a number in it.
 - If the type is an Array, make it an actual JSON array with all the relevant keys. Example: Array type 'firstname & lastname' becomes [{"firstname": "$data[].firstname", "lastname": "$data[].lastname"}]
 - NEVER use large properties or data directly, even to map custom fields or custom attributes. E.g. $data or $data.fields is not ok. Always go as deep as possible to the specific value, such as $data.fields.id or $data.fields.customfield[1].name.
-- Replace SPACE in keys with underscore
+- Replace SPACE in JSON keys with underscore
+- MUST output valid JSON, no matter the data type you expect!
 
 END FORMATTING RULES
 `, additionalCondition)
 	// If translation is needed, you may use Liquid.
 
-	if debug {
-		log.Printf("[DEBUG] Schemaless: Running GPT (1) with system message: %s", systemMessage)
-	}
+	//if debug {
+	//	log.Printf("[DEBUG] Schemaless: Running GPT (1) with system message: %s", systemMessage)
+	//}
 
 	//userQuery := fmt.Sprintf("Translate the given user input JSON structure to a standard format. Use the values from the standard to guide you what to look for. The standard format should follow the pattern:\n\n```json\n%s\n```\n\nUser Input:\n```json\n%s\n```\n\nGenerate the standard output structure without providing the expected output.", standardFormat, inputDataFormat)
 	userQuery := fmt.Sprintf("Standard:\n```json\n%s\n```\n\n\n\nUser Input:\n```json\n%s\n```", standardFormat, inputDataFormat)
@@ -427,8 +427,8 @@ func GetStructureFromCache(ctx context.Context, inputKeyToken string) (map[strin
 	fixedCache := FixTranslationStructure(string(cacheData))
 	err = json.Unmarshal([]byte(fixedCache), &returnStructure)
 	if err != nil {
-		log.Printf("[ERROR] Schemaless: Failed to unmarshal from cache key %s: %s. Value: %s", inputKeyTokenMd5, err, cacheData)
-		return returnStructure, err
+		log.Printf("[ERROR] Schemaless: Failed to unmarshal from cache key %s: %s. Value: %s\nContinuing anyway.", inputKeyTokenMd5, err, string(fixedCache))
+		return returnStructure, nil 
 	}
 
 	// Reseting it in cache to update timing
@@ -650,9 +650,13 @@ func FixTranslationStructure(gptTranslated string) string {
 }
 
 func SaveTranslation(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig) error {
+	// Due to {} or similar. Don't want to save empty standards.
+	if len(inputStandard) <= 4 {
+		return nil
+	}
+
 	// Check if the data starts with ``` or ```json and ends with ``` or ```json
 	gptTranslated = FixTranslationStructure(gptTranslated)
-
 	if len(shuffleConfig.URL) > 0 {
 		// Used to be a goroutine
 		return AddShuffleFile(inputStandard, "translation_output", []byte(gptTranslated), shuffleConfig)
@@ -746,6 +750,7 @@ func LoadStandardFromGithub(client github.Client, owner, repo, path, filename st
 
 	matchingFiles := []*github.RepositoryContent{}
 	searchname := strings.ToLower(strings.ReplaceAll(filename, " ", "_"))
+
 	for _, item := range files {
 		itemName := strings.ToLower(strings.ReplaceAll(*item.Name, " ", "_"))
 		if len(itemName) > 0 && strings.HasPrefix(itemName, searchname) {
@@ -826,10 +831,8 @@ func LoadAndSaveStandard(inputStandard string) error {
 }
 
 func GetStandard(inputStandard string, shuffleConfig ShuffleConfig) ([]byte, error) {
-
 	if len(shuffleConfig.URL) > 0 {
 		// Get the standard from shuffle instead, as we are storing standards there in prod
-
 		return FindShuffleFile(inputStandard, "translation_standards", shuffleConfig)
 	}
 
@@ -2034,6 +2037,14 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 			}
 
 			return []byte{}, errors.New("Finding substandard and list parsing")
+		} else if !skipSubstandard && strings.HasSuffix(trimmedStandard, ".json") {
+			log.Printf("[INFO] Side-loading substandard %s", trimmedStandard)
+
+			_, err := GetStandard(trimmedStandard, shuffleConfig)
+			if err != nil {
+				log.Printf("[ERROR] Schemaless: Error in GetSubStandard for standard %#v used for lists/standard references references: %v", trimmedStandard, err)
+				return []byte{}, err
+			}
 		} else {
 			log.Printf("[DEBUG] Schemaless: No substandard found in the standard format for '%s'. Should continue with translation", inputStandard)
 		}
