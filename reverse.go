@@ -322,14 +322,18 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 			continue
 		}
 
-		// FIXME: This can crash, no? 
-		// Requires weird input, but could happen
-		matching := FindMatchingString(value.(string), searchInMap)
-		if len(matching) == 0 {
-			continue
-		}
+		if stringVal, ok := value.(string); ok {
+			// FIXME: This can crash, no? 
+			// Requires weird input, but could happen
+			matching := FindMatchingString(stringVal, searchInMap)
+			if len(matching) == 0 {
+				continue
+			}
 
-		newMap[matching] = key
+			newMap[matching] = key
+		} else {
+			log.Printf("[ERROR] Schemaless reverse: Type %#v not handled. Value: %#v", reflect.TypeOf(value).String(), value)
+		}
 	}
 
 	reversed, err := json.MarshalIndent(newMap, "", "	")
