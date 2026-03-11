@@ -1843,7 +1843,7 @@ func handleSubStandard(ctx context.Context, subStandard string, returnJson strin
 				continue
 			}
 
-			schemalessOutput, err := Translate(ctx, subStandard, marshalledBody, authConfig, "skip_substandard")
+			schemalessOutput, _, err := Translate(ctx, subStandard, marshalledBody, authConfig, "skip_substandard")
 			if err != nil {
 				log.Printf("[ERROR] Schemaless: Error in schemaless.Translate for sub list item: %v", err)
 				continue
@@ -1865,7 +1865,7 @@ func handleSubStandard(ctx context.Context, subStandard string, returnJson strin
 			}
 
 			// FIXME: Override the reference file after it has been successful for one?
-			schemalessOutput, err := Translate(ctx, subStandard, marshalledBody, authConfig, "skip_substandard")
+			schemalessOutput, _, err := Translate(ctx, subStandard, marshalledBody, authConfig, "skip_substandard")
 			if err != nil {
 				log.Printf("[ERROR] Schemaless: Error in schemaless.Translate for sub list item: %v", err)
 				return
@@ -1901,7 +1901,7 @@ func handleSubStandard(ctx context.Context, subStandard string, returnJson strin
 }
 
 // Add optional argument for whether to use shuffle files or not
-func Translate(ctx context.Context, inputStandard string, inputValue []byte, inputConfig ...string) ([]byte, error) {
+func Translate(ctx context.Context, inputStandard string, inputValue []byte, inputConfig ...string) ([]byte, string, error) {
 
 	// shuffleConfig is an overwrite we can use. Contains in first item with comma separation in order:
 	// keepOriginal (keep unstructured in blob)
@@ -1970,10 +1970,11 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		startValue = output
 	}
 
+	translationFilePath := ""
 	returnJson, keyToken, err := RemoveJsonValues([]byte(startValue), 1)
 	if err != nil {
 		log.Printf("[ERROR] Schemaless json removal (2): %v", err)
-		return []byte{}, err
+		return []byte{}, translationFilePath, err
 	}
 
 	// Used to handle recursion and weird names
@@ -1982,10 +1983,15 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 	}
 
 	keyTokenFile := fmt.Sprintf("%s%s-%x", filenamePrefix, inputStandard, md5.Sum([]byte(keyToken)))
+
+	if len(translationFilePath) == 0 {
+		translationFilePath = keyTokenFile
+	}
+
 	err = SaveParsedInput(keyTokenFile, returnJson, shuffleConfig)
 	if err != nil {
 		log.Printf("[WARNING] Schemaless: Error in SaveParsedInput for file %s: '%v'", keyTokenFile, err)
-		return inputValue, nil
+		return inputValue, translationFilePath, nil
 	}
 
 	// Check if the keyToken is already in cache and use that translation layer
@@ -2005,7 +2011,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		standardFormat, err := GetStandard(inputStandard, shuffleConfig)
 		if err != nil {
 			log.Printf("[WARNING] Schemaless: Problem in GetStandard for standard %#v: %v", inputStandard, err)
-			return inputValue, nil
+			return inputValue, translationFilePath, nil
 		}
 
 		if debug {
@@ -2020,7 +2026,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 			_, err := GetStandard(standardName, shuffleConfig)
 			if err != nil {
 				log.Printf("[ERROR] Schemaless: Error in GetSubStandard for standard %#v used for lists/standard references references: %v", standardName, err)
-				return []byte{}, err
+				return []byte{}, translationFilePath, err
 			}
 
 			// FIXME: Find the list in the inputdata. Map each item to the substandard, and then return the list
@@ -2033,17 +2039,17 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 			if err != nil {
 				log.Printf("[ERROR] Schemaless: Error in handleSubStandard: %v", err)
 			} else {
-				return resp, nil
+				return resp, translationFilePath, nil
 			}
 
-			return []byte{}, errors.New("Finding substandard and list parsing")
+			return []byte{}, translationFilePath, errors.New("Finding substandard and list parsing")
 		} else if !skipSubstandard && strings.HasSuffix(trimmedStandard, ".json") {
 			log.Printf("[INFO] Side-loading substandard %s", trimmedStandard)
 
 			_, err := GetStandard(trimmedStandard, shuffleConfig)
 			if err != nil {
 				log.Printf("[ERROR] Schemaless: Error in GetSubStandard for standard %#v used for lists/standard references references: %v", trimmedStandard, err)
-				return []byte{}, err
+				return []byte{}, translationFilePath, err
 			}
 		} else {
 			log.Printf("[DEBUG] Schemaless: No substandard found in the standard format for '%s'. Should continue with translation", inputStandard)
@@ -2058,13 +2064,13 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 				SaveTranslation(keyTokenFile, gptTranslated, shuffleConfig)
 			}
 
-			return []byte{}, err
+			return []byte{}, translationFilePath, err
 		}
 
 		err = SaveTranslation(keyTokenFile, gptTranslated, shuffleConfig)
 		if err != nil {
 			log.Printf("[ERROR] Schemaless: Problem in SaveTranslation (3): %v", err)
-			return []byte{}, err
+			return []byte{}, translationFilePath, err
 		}
 
 		inputStructure = []byte(gptTranslated)
@@ -2090,7 +2096,7 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 		err = json.Unmarshal([]byte(fixedCache), &returnStructure)
 		if err != nil {
 			log.Printf("[ERROR] Schemaless: Error in unmarshal of returnStructure from cache for keyToken (2) %#v: %v", keyToken, err)
-			//return []byte{}, err
+			//return []byte{}, translationFilePath, err
 		}
 	}
 
@@ -2101,12 +2107,12 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 	translation, modifiedInput, err := runJsonTranslation(ctx, []byte(startValue), returnStructure, keepOriginal)
 	if err != nil {
 		log.Printf("[ERROR] Error in runJsonTranslation: %v", err)
-		return translation, err
+		return translation, translationFilePath, err
 	}
 
 	_ = modifiedInput
 
-	return translation, nil
+	return translation, translationFilePath, nil
 }
 
 func init() {
@@ -2136,6 +2142,6 @@ func main() {
 	allStandards := []string{"ticket"}
 
 	ctx := context.Background()
-	output, err := Translate(ctx, allStandards[0], startValue)
+	output, _, err := Translate(ctx, allStandards[0], startValue)
 	log.Printf("OUTPUT: %s, Err: %#v", string(output), err)
 }
