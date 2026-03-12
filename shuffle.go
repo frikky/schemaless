@@ -361,9 +361,11 @@ func GetShuffleFileById(id string, shuffleConfig ShuffleConfig) ([]byte, error) 
 }
 
 // Finds a file in shuffle in a specified category
-func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte, error) {
+// The string return is the filepath OR the file ID, with priority on file ID.
+func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte, string, error) {
+	filename := ""
 	if len(shuffleConfig.URL) < 1 {
-		return []byte{}, errors.New("Shuffle URL not set")
+		return []byte{}, filename, errors.New("Shuffle URL not set")
 	}
 
 
@@ -392,7 +394,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 	if err == nil {
 		//log.Printf("[INFO] Schemaless: FOUND file %#v in category %#v from cache", name, category)
 		body = []byte(cache.([]uint8))
-		//return cacheData, nil
+		//return cacheData, filename, nil
 	} else {
 		if debug { 
 			log.Printf("[DEBUG] Schemaless: Finding file %#v in category %#v from Shuffle backend", newName, category)
@@ -418,7 +420,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 
 		if err != nil {
 			log.Printf("[ERROR] Schemaless (2): Error getting category %#v from Shuffle backend: %s", category, err)
-			return []byte{}, err
+			return []byte{}, filename, err
 		}
 
 		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", shuffleConfig.Authorization))
@@ -429,20 +431,20 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		resp, err := client.Do(req)
 		if err != nil {
 			log.Printf("[ERROR] Schemaless (3): Error getting category %#v from Shuffle backend: %s", category, err)
-			return []byte{}, err
+			return []byte{}, filename, err
 		}
 
 
 		body, err = ioutil.ReadAll(resp.Body)
 		if err != nil {
 			log.Printf("[ERROR] Schemaless (4): Error reading category %#v from Shuffle backend: %s", category, err)
-			return []byte{}, err
+			return []byte{}, filename, err
 		}
 
 		go SetCache(ctx, cacheKey, body, 3)
 		if resp.StatusCode != 200 {
 			log.Printf("[ERROR] Schemaless: Bad status code (2) getting category %#v from Shuffle backend %#v: %s", category, categoryUrl, resp.Status)
-			return []byte{}, errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
+			return []byte{}, filename, errors.New(fmt.Sprintf("Bad status code: %s", resp.Status))
 		}
 
 		if debug { 
@@ -455,7 +457,7 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 	err = json.Unmarshal(body, &files)
 	if err != nil {
 		log.Printf("[ERROR] Schemaless (5): Error unmarshalling category %#v from Shuffle backend: %s", category, err)
-		return []byte{}, err
+		return []byte{}, filename, err
 	}
 
 	newName = strings.TrimSpace(strings.ToLower(strings.Replace(newName, " ", "_", -1)))
@@ -463,36 +465,40 @@ func FindShuffleFile(name, category string, shuffleConfig ShuffleConfig) ([]byte
 		newName = newName[:len(name)-5]
 	}
 
-
 	for _, file := range files.List {
 		if file.Status != "active" {
 			continue
 		}
 
-		filename := strings.TrimSpace(strings.ToLower(strings.Replace(file.Name, " ", "_", -1)))
-		if strings.HasSuffix(filename, ".json") {
-			filename = filename[:len(filename)-5]
+		innerfilename := strings.TrimSpace(strings.ToLower(strings.Replace(file.Name, " ", "_", -1)))
+		if strings.HasSuffix(innerfilename, ".json") {
+			innerfilename = innerfilename[:len(innerfilename)-5]
 		}
 
-		//if strings.Contains(filename, name) {
-		if filename != newName { 
+		if innerfilename != newName { 
 			continue
 		}
 
+		filename = innerfilename
 		downloadedFile, err := GetShuffleFileById(file.Id, shuffleConfig)
 		if err != nil {
 			log.Printf("[ERROR] Schemaless (6): Error getting file %#v from Shuffle backend: %s", newName, err)
-			return []byte{}, err
+			return []byte{}, filename, err
 		}
 
-		//if debug { 
-		//	log.Printf("[DEBUG] Schemaless: Found file '%s' in category '%s' with ID '%s'", newName, category, file.Id)
-		//}
-
-		return downloadedFile, nil
+		// This is the important part. Returning an ID is perfect
+		return downloadedFile, file.Id, nil
 	}
 
-	return []byte{}, errors.New(fmt.Sprintf("Failed to find translation file matching name '%s' in category '%s'", newName, category)) 
+	// Validation
+	//if debug { 
+	//	log.Printf("File search: %s", newName)
+	//	log.Printf("FILES: %d", len(files.List))
+	//	log.Printf("BODY: %s", body)
+	//	os.Exit(3)
+	//}
+
+	return []byte{}, filename, errors.New(fmt.Sprintf("Failed to find translation file matching name '%s' in category '%s'", newName, category)) 
 }
 
 // Cache handlers
