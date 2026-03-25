@@ -512,6 +512,9 @@ func RemoveJsonValues(input []byte, depth int64) ([]byte, string, error) {
 		// Check if it's a list or not
 		if _, ok := jsonParsed[k].([]interface{}); ok {
 			// Recurse this function
+			//if k == "headers" {
+			//	continue
+			//}
 
 			newListItem := []interface{}{}
 			for loopItem, v := range jsonParsed[k].([]interface{}) {
@@ -1959,6 +1962,8 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 
 	keepOriginal := false
 	if len(inputConfig) > 0 {
+		// authConfig := fmt.Sprintf("true,%s,%s,%s,%s", baseUrl, authorization, orgId, optionalExecutionId)
+
 		parsedInput := strings.Split(inputConfig[0], ",")
 		for cnt, config := range parsedInput {
 			if cnt == 0 {
