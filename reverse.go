@@ -1,15 +1,15 @@
-package schemaless 
+package schemaless
 
 /*
 Runs a reverse search through JSON, to find the schemaless based on two inputs
 */
 
 import (
-	"log"
-	"fmt"
-	"strings"
-	"reflect"
 	"encoding/json"
+	"fmt"
+	"log"
+	"reflect"
+	"strings"
 )
 
 // Recursive function to search for the location in the map and put the value there
@@ -144,10 +144,9 @@ func MapValueToLocation(mapToSearch map[string]interface{}, location, value stri
 						continue
 					}
 
-
 					if subValue, ok := v.(map[string]interface{}); ok {
 						//newMap[key] = append(subValue[key].([]interface{}), mapValue)
-						//_ = subValue 
+						//_ = subValue
 						splitLocationParts := locationParts[1:]
 						if len(splitLocationParts) < 2 {
 							log.Printf("[ERROR] Schemaless: (1) handling []interface{} with arbitary values. This MAY not work. '%#v' -> %#v", key, mapValue)
@@ -163,7 +162,7 @@ func MapValueToLocation(mapToSearch map[string]interface{}, location, value stri
 						loopMap = append(loopMap, MapValueToLocation(subValue, strings.Join(splitLocationParts, "."), value))
 
 					} else {
-						//if debug { 
+						//if debug {
 						//	log.Printf("[DEBUG] Schemaless: No LOOP sub-handler for replacing values of type %#v. Value: %#v", reflect.TypeOf(v).String(), v)
 						//}
 
@@ -171,7 +170,7 @@ func MapValueToLocation(mapToSearch map[string]interface{}, location, value stri
 					}
 				}
 
-				mapToSearch[key] = loopMap 
+				mapToSearch[key] = loopMap
 				continue
 			} else {
 				log.Printf("[ERROR] Schemaless handling unknown type %#v. Value: %#v", reflect.TypeOf(mapValue).String(), value)
@@ -186,12 +185,11 @@ func MapValueToLocation(mapToSearch map[string]interface{}, location, value stri
 	return mapToSearch
 }
 
-
 func FindMatchingString(stringToFind string, mapToSearch map[string]interface{}) string {
 	for key, value := range mapToSearch {
 		if _, ok := value.(string); !ok {
 			continue
-		} 
+		}
 
 		foundValue := value.(string)
 		if foundValue == stringToFind {
@@ -269,7 +267,6 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 							continue
 						}
 
-		
 						matching := FindMatchingString(stringval, searchInMap)
 						if len(matching) == 0 {
 							//log.Printf("No matching found for %#v (2)", stringval)
@@ -277,7 +274,6 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 						}
 
 						newMap[matching] = fmt.Sprintf("%s.#%d", key, i)
-
 
 					} else if mapval, ok := v.(map[string]interface{}); ok {
 						// Recursively search for the value in the map
@@ -302,7 +298,7 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 							newMap[k] = fmt.Sprintf("%s.#%d.%s", key, i, v)
 						}
 					} else if v == nil {
-						continue
+						log.Printf("[ERROR] Schemaless reverse: No sublist handler for nil value. Full val: %#v", val)
 					} else {
 						log.Printf("[ERROR] Schemaless reverse: No sublist handler for type %#v\n\nFull val: %#v", reflect.TypeOf(v).String(), val)
 					}
@@ -310,15 +306,15 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 					//newMap[matching] = key + ".#" + string(i)
 				}
 
-			/*
-			} else if val, ok := value.(float64); ok {
-				log.Printf("\n\n\n[DEBUG] Got float64: %#v. Key: %#v\n\n\n", key, val)
-				// Check if it's a list and try to find the value in it
-				newMap[fmt.Sprintf("%f", val)] = key
-			*/
+				/*
+					} else if val, ok := value.(float64); ok {
+						log.Printf("\n\n\n[DEBUG] Got float64: %#v. Key: %#v\n\n\n", key, val)
+						// Check if it's a list and try to find the value in it
+						newMap[fmt.Sprintf("%f", val)] = key
+				*/
 
 			} else if value == nil {
-				continue
+				log.Printf("[ERROR] Schemaless reverse: No base handler for nil value. Key: %#v", key)
 			} else {
 				log.Printf("[ERROR] Schemaless reverse: No base handler for type %#v. Value: %#v", reflect.TypeOf(value).String(), value)
 			}
@@ -327,7 +323,7 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 		}
 
 		if stringVal, ok := value.(string); ok {
-			// FIXME: This can crash, no? 
+			// FIXME: This can crash, no?
 			// Requires weird input, but could happen
 			matching := FindMatchingString(stringVal, searchInMap)
 			if len(matching) == 0 {
@@ -349,13 +345,11 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 	return string(reversed), nil
 }
 
-
-
 func removeWhitespace(input string) string {
 	// Remove all whitespace from the strings
 	return strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(input, " ", ""), "\n", ""), "\t", "")
 }
-	
+
 func compareOutput(reversed, expectedOutput string) bool {
 	// Remove all whitespace from the strings
 	reversed = removeWhitespace(reversed)
@@ -458,26 +452,26 @@ func runTest() {
 	reversed, err := ReverseTranslateStrings(findKeys, findInData)
 
 	/*
-	var sourceMap map[string]interface{}
-	err := json.Unmarshal([]byte(findKeys), &sourceMap)
-	if err != nil {
-		log.Printf("[ERROR] Unmarshalling failed: %v", err)
-		return 
-	}
+		var sourceMap map[string]interface{}
+		err := json.Unmarshal([]byte(findKeys), &sourceMap)
+		if err != nil {
+			log.Printf("[ERROR] Unmarshalling failed: %v", err)
+			return
+		}
 
-	var searchInMap map[string]interface{}
-	err = json.Unmarshal([]byte(findInData), &searchInMap)
-	if err != nil {
-		log.Printf("[ERROR] Unmarshalling failed: %v", err)
-		return 
-	}
+		var searchInMap map[string]interface{}
+		err = json.Unmarshal([]byte(findInData), &searchInMap)
+		if err != nil {
+			log.Printf("[ERROR] Unmarshalling failed: %v", err)
+			return
+		}
 
-	reversed, err := ReverseTranslate(sourceMap, searchInMap)
+		reversed, err := ReverseTranslate(sourceMap, searchInMap)
 	*/
 
 	if err != nil {
 		log.Printf("[ERROR] Reversing failed: %v", err)
-		return 
+		return
 	}
 
 	sameKeyValues := compareOutput(reversed, expectedOutput)
@@ -500,7 +494,6 @@ func testMapToLocation() {
 		}
 	  }
 	}`
-
 
 	mappedBody := make(map[string]interface{})
 	_ = json.Unmarshal([]byte(body), &mappedBody)
