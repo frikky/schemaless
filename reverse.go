@@ -301,6 +301,8 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 
 							newMap[k] = fmt.Sprintf("%s.#%d.%s", key, i, v)
 						}
+					} else if v == nil {
+						continue
 					} else {
 						log.Printf("[ERROR] Schemaless reverse: No sublist handler for type %#v\n\nFull val: %#v", reflect.TypeOf(v).String(), val)
 					}
@@ -315,6 +317,8 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 				newMap[fmt.Sprintf("%f", val)] = key
 			*/
 
+			} else if value == nil {
+				continue
 			} else {
 				log.Printf("[ERROR] Schemaless reverse: No base handler for type %#v. Value: %#v", reflect.TypeOf(value).String(), value)
 			}
