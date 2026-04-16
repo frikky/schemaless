@@ -99,7 +99,7 @@ func SaveQuery(inputStandard, gptTranslated string, shuffleConfig ShuffleConfig)
 	return nil
 }
 
-func GptTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleConfig ShuffleConfig) (string, error) {
+func LLMTranslate(keyTokenFile, standardFormat, inputDataFormat string, shuffleConfig ShuffleConfig) (string, error) {
 
 	additionalCondition := fmt.Sprintf("")
 
@@ -191,14 +191,21 @@ END FORMATTING RULES
 	SaveQuery(keyTokenFile, userQuery, shuffleConfig)
 
 	apiKey := os.Getenv("AI_API_KEY")
-	aiRequestUrl := os.Getenv("AI_API_URL")
 	if len(apiKey) == 0 {
 		apiKey = os.Getenv("OPENAI_API_KEY")
 	}
 
+	// Specific control
+	schemalessKey := os.Getenv("SCHEMALESS_AI_API_KEY")
+	if len(schemalessKey) > 0 {
+		apiKey = schemalessKey
+	}
+
+	aiRequestUrl := os.Getenv("AI_API_URL")
 	if len(aiRequestUrl) == 0 {
 		aiRequestUrl = os.Getenv("OPENAI_API_URL")
 	}
+
 
 	if len(apiKey) == 0 {
 		return standardFormat, errors.New("AI_API_KEY not set")
@@ -225,14 +232,16 @@ END FORMATTING RULES
 
 	contentOutput := ""
 	cnt := 0
+
+	openaiResp2 := openai.ChatCompletionResponse{}
 	for {
 		if cnt >= 5 {
 			log.Printf("[ERROR] Schemaless: Failed to match Formatting in standard translation after 5 tries. Returning empty string.")
 
-			return standardFormat, errors.New("Failed to match Formatting in standard translation after 5 tries")
+			return standardFormat, errors.New(fmt.Sprintf("Failed to match Formatting in standard translation after 5 tries. Raw error: %s", err.Error()))
 		}
 
-		openaiResp2, err := openaiClient.CreateChatCompletion(
+		openaiResp2, err = openaiClient.CreateChatCompletion(
 			context.Background(),
 			openai.ChatCompletionRequest{
 				Model: chosenModel,
@@ -253,12 +262,22 @@ END FORMATTING RULES
 
 		if err != nil {
 			log.Printf("[ERROR] Schemaless: Failed to create chat completion in runActionAI. Retrying in 3 seconds (1): %s", err)
+
+			// Handling specifically a 429 response, as this rarely randomly
+			// fixes itself within 10 seconds~.
+			if cnt == 0 && strings.Contains(err.Error(), "429") {
+				return standardFormat, errors.New(fmt.Sprintf("LLM Rate limit hit during single translation: %s", err.Error()))
+			}
+
 			time.Sleep(3 * time.Second)
 			cnt += 1
 			continue
 		}
 
 		contentOutput = openaiResp2.Choices[0].Message.Content
+		if len(openaiResp2.Choices) > 0 {
+			log.Printf("[WARNING] Schemaless: More LLM choices in response, but only handling first one")
+		}
 		break
 	}
 
@@ -2115,19 +2134,21 @@ func Translate(ctx context.Context, inputStandard string, inputValue []byte, inp
 				return []byte{}, translationFilePath, err
 			}
 		} else {
-			log.Printf("[DEBUG] Schemaless: No substandard found in the standard format for '%s'. Should continue with translation", inputStandard)
+			if debug { 
+				log.Printf("[DEBUG] Schemaless: No substandard found in the standard format for '%s'. Should continue with translation", inputStandard)
+			}
 		}
 
-		gptTranslated, err := GptTranslate(keyTokenFile, string(standardFormat), string(returnJson), shuffleConfig)
+		gptTranslated, err := LLMTranslate(keyTokenFile, string(standardFormat), string(returnJson), shuffleConfig)
 		if err != nil {
-			log.Printf("[ERROR] Schemaless: Error in GptTranslate: %v", err)
+			log.Printf("[ERROR] Schemaless: Error in LLMTranslate: %v", err)
 
 			if strings.Contains(fmt.Sprintf("%s", err), "OPENAI") {
-				log.Printf("[DEBUG] Schemaless: Saving standard even though no OPENAI key is supplied")
-				SaveTranslation(keyTokenFile, gptTranslated, shuffleConfig)
+				//log.Printf("[DEBUG] Schemaless: Saving standard even though no OPENAI key is supplied")
+				//SaveTranslation(keyTokenFile, gptTranslated, shuffleConfig)
 			}
 
-			return []byte{}, translationFilePath, err
+			return []byte(err.Error()), translationFilePath, err
 		}
 
 		err = SaveTranslation(keyTokenFile, gptTranslated, shuffleConfig)
