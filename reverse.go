@@ -315,8 +315,11 @@ func ReverseTranslate(sourceMap, searchInMap map[string]interface{}) (string, er
 
 			} else if value == nil {
 				log.Printf("[ERROR] Schemaless reverse: No base handler for nil value. Key: %#v", key)
+			} else if _, ok := value.(bool); ok {
+				// Skip bool sub-handler
+				continue
 			} else {
-				log.Printf("[ERROR] Schemaless reverse: No base handler for type %#v. Value: %#v", reflect.TypeOf(value).String(), value)
+				log.Printf("[ERROR] Schemaless reverse: No base handler for type %#v. Key: %#v, Value: %#v", reflect.TypeOf(value).String(), key, value)
 			}
 
 			continue
