@@ -206,6 +206,7 @@ END FORMATTING RULES
 		aiRequestUrl = os.Getenv("OPENAI_API_URL")
 	}
 
+	// Mimicks usage in shuffle-shared 
 	projectID := os.Getenv("SHUFFLE_GCEPROJECT")
 	if len(projectID) > 0 { 
 		foundApikey, foundRequestUrl, foundModel := GetGeminiCredentials(ctx)
@@ -218,6 +219,26 @@ END FORMATTING RULES
 		}
 
 		if len(chosenModel) == 0 || !strings.HasPrefix(chosenModel, "google/") {
+			chosenModel = foundModel
+		}
+	} 
+
+	// This is for onprem fallback
+	if len(shuffleConfig.OrgId) > 0 {
+		// Look up custom auth to use instead
+		foundApikey, foundrequestUrl, foundModel := GetOrgAiCredentials(ctx, shuffleConfig)
+		if len(foundApikey) > 0 {
+			apiKey = foundApikey
+
+			// Overwriting internal LLM URL is strictly permitted ONLY when paired with a custom API key
+			if len(foundrequestUrl) > 0 {
+				aiRequestUrl = foundrequestUrl
+			}
+		} else if len(foundrequestUrl) > 0 {
+			log.Printf("[WARNING] Schemaless: Org %s attempted to override AI URL without providing an API key. Ignoring custom URL to prevent credential leakage.", shuffleConfig.OrgId)
+		}
+
+		if len(foundModel) > 0 {
 			chosenModel = foundModel
 		}
 	}
