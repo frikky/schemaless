@@ -31,7 +31,7 @@ import (
 )
 
 // var chosenModel = "gpt-4-turbo-preview"
-var chosenModel = "gpt-5-mini"
+var chosenModel = "gpt-5.6-terra"
 var debug = os.Getenv("DEBUG") == "true"
 var maxInputSize = 15000 
 
@@ -206,6 +206,21 @@ END FORMATTING RULES
 		aiRequestUrl = os.Getenv("OPENAI_API_URL")
 	}
 
+	projectID := os.Getenv("SHUFFLE_GCEPROJECT")
+	if len(projectID) > 0 { 
+		foundApikey, foundRequestUrl, foundModel := GetGeminiCredentials(ctx)
+		if len(foundApikey) > 0 {
+			apiKey = foundApikey
+		}
+
+		if len(foundRequestUrl) > 0 {
+			aiRequestUrl = foundRequestUrl
+		}
+
+		if len(chosenModel) == 0 || !strings.HasPrefix(chosenModel, "google/") {
+			chosenModel = foundModel
+		}
+	}
 
 	if len(apiKey) == 0 {
 		return standardFormat, errors.New("AI_API_KEY not set")

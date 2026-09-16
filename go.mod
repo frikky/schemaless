@@ -10,15 +10,19 @@ require (
 	github.com/osteele/liquid v1.7.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/sashabaranov/go-openai v1.40.5
+	golang.org/x/oauth2 v0.0.0-20180821212333-d2e6202438be
 	google.golang.org/appengine v1.6.8
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/osteele/tuesday v1.0.3 // indirect
 	golang.org/x/crypto v0.40.0 // indirect
+	golang.org/x/net v0.41.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
